@@ -19,8 +19,11 @@ import dagger.hilt.android.AndroidEntryPoint
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
-        installSplashScreen()
+        val splash = installSplashScreen()
         super.onCreate(savedInstanceState)
+
+        var keepSplash = true
+        splash.setKeepOnScreenCondition { keepSplash }
 
         enableEdgeToEdge(
             statusBarStyle = SystemBarStyle.dark(Color.TRANSPARENT),
@@ -33,13 +36,13 @@ class MainActivity : ComponentActivity() {
             val uiState by appViewModel.uiState.collectAsStateWithLifecycle()
             val playerState by playerViewModel.uiState.collectAsStateWithLifecycle()
 
+            keepSplash = !uiState.isReady
+
             val resolvedAppearance = uiState.appearance.copy(
-                dynamicCoverAccent = if (playerState.currentTrack != null &&
-                    uiState.coverAccentPreset == com.xeno.mupa.ui.CoverAccentPreset.EMBER_DEFAULT
-                ) {
+                dynamicCoverAccent = if (playerState.currentTrack != null) {
                     playerState.coverAccent
                 } else {
-                    uiState.coverAccentPreset.accent
+                    uiState.appearance.dynamicCoverAccent
                 },
             )
 
@@ -47,11 +50,15 @@ class MainActivity : ComponentActivity() {
                 MupaApp(
                     uiState = uiState,
                     playerState = playerState,
+                    onExitApp = { finish() },
+                    onPlayTracks = playerViewModel::playQueue,
                     onGlassStyleChange = appViewModel::setGlassStyle,
                     onOledModeChange = appViewModel::setOledMode,
                     onAuroraEnabledChange = appViewModel::setAuroraEnabled,
                     onPerformanceModeChange = appViewModel::setPerformanceMode,
-                    onCoverAccentPresetChange = appViewModel::setCoverAccentPreset,
+                    onStripArtistNameChange = appViewModel::setStripArtistName,
+                    onOpenEditFavoriteArtists = appViewModel::openEditFavoriteArtists,
+                    onCloseEditFavoriteArtists = appViewModel::closeEditFavoriteArtists,
                     onTogglePlayPause = playerViewModel::togglePlayPause,
                     onSeekTo = playerViewModel::seekTo,
                     onSkipNext = playerViewModel::skipNext,

@@ -4,7 +4,11 @@ import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.preferencesDataStore
+import com.xeno.mupa.core.domain.ArtistRepository
+import com.xeno.mupa.core.domain.MusicSource
 import com.xeno.mupa.core.domain.PreferencesRepository
+import com.xeno.mupa.data.fake.FakeArtistRepository
+import com.xeno.mupa.data.fake.FakeMusicSource
 import com.xeno.mupa.data.preferences.DataStorePreferencesRepository
 import dagger.Binds
 import dagger.Module
@@ -36,4 +40,16 @@ abstract class RepositoryBindingsModule {
     abstract fun bindPreferencesRepository(
         impl: DataStorePreferencesRepository,
     ): PreferencesRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindArtistRepository(
+        impl: FakeArtistRepository,
+    ): ArtistRepository
+
+    @Binds
+    @Singleton
+    abstract fun bindMusicSource(
+        impl: FakeMusicSource,
+    ): MusicSource
 }
