@@ -288,7 +288,7 @@ class LibraryViewModel @Inject constructor(
 }
 
 /**
- * Layar Pustaka bergaya Mupa Calm dengan struktur tile ala Pustaka lama + switch Awan/Ponsel (perbaikan B7 & B12).
+ * Layar Pustaka bergaya Mupa Calm dengan struktur tile kategori + switch Awan/Ponsel (perbaikan B7 & B12).
  * - Switch Awan (Streaming) / Ponsel (Lokal) di header memisahkan sumber secara nyata.
  * - Mode Lokal memiliki tombol eksplisit Import Lagu, Import Folder, dan Pindai Ulang Folder.
  * - Drill-down daftar memakai SATU tombol Urutkan/Filter (MupaFilterSheet), bukan 3 baris chip.
@@ -652,7 +652,7 @@ private fun SourceModeSwitch(
 }
 
 /**
- * Tile Pustaka ala Music X lama dengan gaya Mupa Calm:
+ * Tile Pustaka kategori bergaya Mupa Calm:
  * - Solid Surface1 + hairline 1dp, angka besar krem tabular, tumpukan 2 cover miring di kanan bawah.
  */
 @Composable
