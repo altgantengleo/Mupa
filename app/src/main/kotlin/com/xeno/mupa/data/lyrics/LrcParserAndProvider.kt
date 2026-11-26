@@ -242,7 +242,7 @@ class LrcLibLyricsProvider(
             if (exact != null) return@withContext Result.success(exact)
         }
 
-        // 2. Fallback /api/search dengan filter toleransi durasi +-2 detik
+        // 2. Fallback /api/search dengan track_name + artist_name
         val searchUrl = "https://lrclib.net/api/search".toHttpUrl().newBuilder()
             .addQueryParameter("track_name", cleanTitle)
             .apply {
@@ -250,14 +250,29 @@ class LrcLibLyricsProvider(
             }
             .build()
 
-        val body = executeGet(searchUrl.toString())
-            .getOrElse { return@withContext Result.failure(it) }
+        val firstBody = executeGet(searchUrl.toString()).getOrNull()
+        val firstCandidates = firstBody?.let { b ->
+            runCatching { json.parseToJsonElement(b).jsonArray }.getOrNull()
+                ?.mapNotNull { runCatching { it.jsonObject }.getOrNull() }
+        }.orEmpty()
 
-        val items = runCatching { json.parseToJsonElement(body).jsonArray }.getOrNull()
+        selectBestCandidate(firstCandidates, request.durationMs)?.let {
+            return@withContext Result.success(it)
+        }
+
+        // 3. Fallback /api/search?q= (lebih toleran untuk metadata YouTube/InnerTube)
+        val qText = listOf(cleanTitle, cleanArtist).filter { it.isNotBlank() }.joinToString(" ")
+        val qUrl = "https://lrclib.net/api/search".toHttpUrl().newBuilder()
+            .addQueryParameter("q", qText)
+            .build()
+        val qBody = executeGet(qUrl.toString())
+            .getOrElse { return@withContext Result.failure(it) }
+        val qCandidates = runCatching { json.parseToJsonElement(qBody).jsonArray }.getOrNull()
+            ?.mapNotNull { runCatching { it.jsonObject }.getOrNull() }
             ?: return@withContext Result.failure(StreamingError.ParseError("Respons LRCLIB tidak valid"))
 
-        val candidates = items.mapNotNull { runCatching { it.jsonObject }.getOrNull() }
-        val chosen = selectBestCandidate(candidates, request.durationMs)
+        val chosen = selectBestCandidate(qCandidates, request.durationMs)
+            ?: selectBestCandidate(qCandidates, targetDurationMs = 0L)
             ?: return@withContext Result.failure(StreamingError.Unavailable("Lirik tidak ditemukan di LRCLIB"))
 
         Result.success(chosen)
@@ -334,6 +349,7 @@ class LrcLibLyricsProvider(
                 return ""
             }
             return trimmed
+                .replace(Regex("""\s*[•·|].*$"""), "")
                 .replace(Regex("""\s*-\s*Topic$""", RegexOption.IGNORE_CASE), "")
                 .replace(Regex("""\s+(?:feat\.?|ft\.?|x|&|,)\s+.+$""", RegexOption.IGNORE_CASE), "")
                 .trim()

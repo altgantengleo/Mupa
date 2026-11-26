@@ -73,6 +73,7 @@ class MainActivity : ComponentActivity() {
                     onCloseOverlay = playerViewModel::closeOverlay,
                     onOpenCinema = playerViewModel::openCinemaMode,
                     onCloseCinema = playerViewModel::closeCinemaMode,
+                    onRetryLyrics = { playerViewModel.fetchLyricsForCurrentTrack(forceRefresh = true) },
                     positionProvider = playerViewModel::currentPlaybackPositionMs,
                     onAdjustLyricsOffset = playerViewModel::adjustLyricsOffset,
                     onResetLyricsOffset = playerViewModel::resetLyricsOffset,

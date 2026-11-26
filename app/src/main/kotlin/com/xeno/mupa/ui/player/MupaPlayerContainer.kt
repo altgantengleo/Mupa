@@ -140,6 +140,7 @@ fun MupaPlayerOverlayHost(
     onCloseOverlay: () -> Unit,
     onOpenCinema: () -> Unit,
     onCloseCinema: () -> Unit,
+    onRetryLyrics: () -> Unit = {},
     onAdjustLyricsOffset: (Long) -> Unit,
     onResetLyricsOffset: () -> Unit,
     onCycleSleepTimer: () -> Unit,
@@ -182,33 +183,28 @@ fun MupaPlayerOverlayHost(
 
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
         val containerMaxWidth = maxWidth
-        val fullHeightPx = with(density) { maxHeight.toPx() }
-        val miniHeightPx = with(density) { MupaPlayerSheetState.MiniPlayerHeight.toPx() }
-        val miniBottomOffsetPx = with(density) { bottomBarClearance.toPx() }
-        val collapsedTopPx = (fullHeightPx - miniBottomOffsetPx - miniHeightPx).coerceAtLeast(0f)
-        sheetState.travelDistancePx = collapsedTopPx.coerceAtLeast(1f)
+        val fullHeightPx = with(density) { maxHeight.toPx() }.coerceAtLeast(1f)
+        sheetState.travelDistancePx = fullHeightPx
 
         val progressProvider = remember(sheetState) { { sheetState.progress } }
-        val isSheetOpen = !sheetState.isCollapsed
+        val showFullSheet = sheetState.isVisible || playerState.isCinemaMode
 
-        // Helper drag vertikal berbasis koordinat layar (nodeTop + localY) agar 1:1 tanpa feedback loop
-        // dan TIDAK pernah memblokir sentuhan/scroll layar belakang saat Mini Player ciut!
-        val miniDragUpModifier = Modifier.pointerInput(sheetState, collapsedTopPx) {
+        // Drag-up HANYA di MiniPlayerBar (64dp) -> 0% blokir scroll layar belakang!
+        val miniDragUpModifier = Modifier.pointerInput(sheetState, fullHeightPx) {
             val velocityTracker = VelocityTracker()
             awaitEachGesture {
                 val down = awaitFirstDown(requireUnconsumed = false)
                 if (sheetState.progress >= 0.5f || playerState.isCinemaMode) return@awaitEachGesture
-                var lastScreenY = collapsedTopPx * (1f - sheetState.progress) + down.position.y
+                var lastY = down.position.y
                 velocityTracker.resetTracking()
-                velocityTracker.addPosition(down.uptimeMillis, Offset(down.position.x, lastScreenY))
+                velocityTracker.addPosition(down.uptimeMillis, down.position)
                 var dragStarted = false
                 val dragChange = awaitVerticalTouchSlopOrCancellation(down.id) { change, over ->
                     if (over < 0f) {
                         change.consume()
                         dragStarted = true
-                        val curScreenY = collapsedTopPx * (1f - sheetState.progress) + change.position.y
-                        val dy = curScreenY - lastScreenY
-                        lastScreenY = curScreenY
+                        val dy = change.position.y - lastY
+                        lastY = change.position.y
                         sheetState.onDragStart()
                         sheetState.onDragDelta(dy)
                     }
@@ -216,10 +212,9 @@ fun MupaPlayerOverlayHost(
                 if (dragChange != null && dragStarted) {
                     verticalDrag(dragChange.id) { change ->
                         change.consume()
-                        val curScreenY = collapsedTopPx * (1f - sheetState.progress) + change.position.y
-                        val dy = curScreenY - lastScreenY
-                        lastScreenY = curScreenY
-                        velocityTracker.addPosition(change.uptimeMillis, Offset(change.position.x, curScreenY))
+                        val dy = change.position.y - lastY
+                        lastY = change.position.y
+                        velocityTracker.addPosition(change.uptimeMillis, change.position)
                         sheetState.onDragDelta(dy)
                     }
                     sheetState.onDragEnd(velocityTracker.calculateVelocity().y)
@@ -227,14 +222,15 @@ fun MupaPlayerOverlayHost(
             }
         }
 
-        val fullDragDownModifier = Modifier.pointerInput(sheetState, collapsedTopPx, sheetOverlayVisible, playerState.isCinemaMode) {
+        // Drag-down 1:1 di Full Now Playing (koordinat layar = sheetTop + localY, 0 feedback loop!)
+        val fullDragDownModifier = Modifier.pointerInput(sheetState, fullHeightPx, sheetOverlayVisible, playerState.isCinemaMode) {
             val velocityTracker = VelocityTracker()
             awaitEachGesture {
                 val down = awaitFirstDown(requireUnconsumed = false)
-                if (sheetState.progress < 0.5f || playerState.isCinemaMode || sheetOverlayVisible) {
+                if (sheetState.progress < 0.2f || playerState.isCinemaMode || sheetOverlayVisible) {
                     return@awaitEachGesture
                 }
-                var lastScreenY = collapsedTopPx * (1f - sheetState.progress) + down.position.y
+                var lastScreenY = fullHeightPx * (1f - sheetState.progress) + down.position.y
                 velocityTracker.resetTracking()
                 velocityTracker.addPosition(down.uptimeMillis, Offset(down.position.x, lastScreenY))
                 var dragStarted = false
@@ -242,7 +238,7 @@ fun MupaPlayerOverlayHost(
                     if (over > 0f) {
                         change.consume()
                         dragStarted = true
-                        val curScreenY = collapsedTopPx * (1f - sheetState.progress) + change.position.y
+                        val curScreenY = fullHeightPx * (1f - sheetState.progress) + change.position.y
                         val dy = curScreenY - lastScreenY
                         lastScreenY = curScreenY
                         sheetState.onDragStart()
@@ -252,7 +248,7 @@ fun MupaPlayerOverlayHost(
                 if (dragChange != null && dragStarted) {
                     verticalDrag(dragChange.id) { change ->
                         change.consume()
-                        val curScreenY = collapsedTopPx * (1f - sheetState.progress) + change.position.y
+                        val curScreenY = fullHeightPx * (1f - sheetState.progress) + change.position.y
                         val dy = curScreenY - lastScreenY
                         lastScreenY = curScreenY
                         velocityTracker.addPosition(change.uptimeMillis, Offset(change.position.x, curScreenY))
@@ -263,110 +259,18 @@ fun MupaPlayerOverlayHost(
             }
         }
 
-        // Lapisan wadah tanpa pointerInput global -> scroll & klik layar belakang 100% lancar saat Mini ciut!
         Box(
             modifier = Modifier
                 .fillMaxSize()
                 .drawBehind {
                     val p = progressProvider()
                     if (p > 0.005f) {
-                        drawRect(Color.Black.copy(alpha = (0.60f * p).coerceIn(0f, 0.60f)))
+                        drawRect(Color.Black.copy(alpha = (0.55f * p).coerceIn(0f, 0.55f)))
                     }
                 },
         ) {
-            val fullBackdropBase = if (appearance.isOledMode) MupaPalette.OledBackground else MupaPalette.Background
-            val coverAccent = appearance.effectiveCoverAccent
-
-            // Sheet terpadu bergerak 0f (Mini) -> 1f (Full) hanya via graphicsLayer
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .graphicsLayer {
-                        val p = progressProvider()
-                        translationY = collapsedTopPx * (1f - p)
-                    },
-            ) {
-                // Lapisan 1: Backdrop Full Now Playing (hanya menangkap sentuhan saat sheet terbuka)
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .then(
-                            if (isSheetOpen) {
-                                Modifier
-                                    .clickable(
-                                        interactionSource = remember { MutableInteractionSource() },
-                                        indication = null,
-                                        onClick = {},
-                                    )
-                                    .then(fullDragDownModifier)
-                            } else {
-                                Modifier
-                            },
-                        )
-                        .graphicsLayer {
-                            val p = progressProvider()
-                            alpha = (p / 0.18f).coerceIn(0f, 1f)
-                        }
-                        .background(fullBackdropBase)
-                        .drawBehind {
-                            if (!appearance.isOledMode && !appearance.isPerformanceMode) {
-                                drawRect(
-                                    brush = Brush.radialGradient(
-                                        colors = listOf(
-                                            coverAccent.primary.copy(alpha = 0.20f),
-                                            coverAccent.secondary.copy(alpha = 0.08f),
-                                            Color.Transparent,
-                                        ),
-                                        center = Offset(size.width * 0.5f, size.height * 0.24f),
-                                        radius = size.width * 0.85f,
-                                    ),
-                                )
-                            }
-                        },
-                )
-
-                // Lapisan 2: Full Now Playing Content (halus tanpa lompatan artwork palsu)
-                FullNowPlayingContent(
-                    track = track,
-                    stripArtistName = stripArtistName,
-                    playerState = playerState,
-                    progressProvider = progressProvider,
-                    positionProvider = positionProvider,
-                    maxWidthDp = containerMaxWidth,
-                    onCollapse = { sheetState.collapse() },
-                    onTogglePlayPause = onTogglePlayPause,
-                    onSeekTo = onSeekTo,
-                    onSkipNext = onSkipNext,
-                    onSkipPrevious = onSkipPrevious,
-                    onToggleShuffle = onToggleShuffle,
-                    onCycleRepeat = onCycleRepeat,
-                    onToggleFavorite = onToggleFavorite,
-                    onToggleLyrics = { onOpenOverlay(PlayerOverlayPane.LYRICS) },
-                    onOpenQueue = { onOpenOverlay(PlayerOverlayPane.QUEUE) },
-                    onOpenEqualizer = { onOpenOverlay(PlayerOverlayPane.EQUALIZER) },
-                    onOpenCinema = onOpenCinema,
-                    onAdjustLyricsOffset = onAdjustLyricsOffset,
-                    onResetLyricsOffset = onResetLyricsOffset,
-                    onCycleSleepTimer = onCycleSleepTimer,
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .then(if (isSheetOpen) fullDragDownModifier else Modifier)
-                        .layout { measurable, constraints ->
-                            val p = progressProvider()
-                            val placeable = measurable.measure(constraints)
-                            layout(placeable.width, placeable.height) {
-                                if (p > 0.04f) {
-                                    placeable.placeRelative(0, 0)
-                                }
-                            }
-                        }
-                        .graphicsLayer {
-                            val p = progressProvider()
-                            alpha = ((p - 0.10f) / 0.42f).coerceIn(0f, 1f)
-                        },
-                )
-
-                // Lapisan 3: Mini Player (hanya area 64dp yang menangkap tap & drag-up!)
+            // 1. Mini Player tersemat rapi di atas Bottom Nav (tidak ikut loncat, hanya memudar halus saat Full naik)
+            if (!sheetState.isSettledExpanded) {
                 MiniPlayerBar(
                     track = track,
                     stripArtistName = stripArtistName,
@@ -377,68 +281,114 @@ fun MupaPlayerOverlayHost(
                     onTogglePlayPause = onTogglePlayPause,
                     onSkipNext = onSkipNext,
                     modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(start = 20.dp, end = 20.dp, bottom = bottomBarClearance)
                         .fillMaxWidth()
-                        .padding(horizontal = 20.dp)
                         .height(MupaPlayerSheetState.MiniPlayerHeight)
                         .then(miniDragUpModifier)
-                        .layout { measurable, constraints ->
-                            val p = progressProvider()
-                            val placeable = measurable.measure(constraints)
-                            layout(placeable.width, placeable.height) {
-                                if (p < 0.28f) {
-                                    placeable.placeRelative(0, 0)
-                                }
-                            }
-                        }
                         .graphicsLayer {
                             val p = progressProvider()
-                            alpha = (1f - p / 0.22f).coerceIn(0f, 1f)
+                            alpha = (1f - p * 3.2f).coerceIn(0f, 1f)
+                            translationY = 18.dp.toPx() * p
                         },
                 )
+            }
 
-                // Lapisan 4: Sheet Antrean & Equalizer (Emphasized Decelerate, 2-frame pre-mount)
-                AnimatedVisibility(
-                    visible = sheetOverlayVisible && sheetState.isExpanded,
-                    enter = slideInVertically(
-                        animationSpec = MupaMotion.emphasizedTween(MupaMotion.DurationSheetMs),
-                        initialOffsetY = { it / 6 },
-                    ) + fadeIn(MupaMotion.standardTween(MupaMotion.DurationShortMs)),
-                    exit = slideOutVertically(
-                        animationSpec = MupaMotion.emphasizedTween(MupaMotion.DurationShortMs),
-                        targetOffsetY = { it / 8 },
-                    ) + fadeOut(MupaMotion.standardTween(MupaMotion.DurationShortMs)),
+            // 2. Full Now Playing Sheet (full-bleed edge-to-edge meluncur mulus dari bawah -> 0 jump!)
+            if (showFullSheet) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            val p = progressProvider()
+                            translationY = fullHeightPx * (1f - p)
+                            val cornerPx = (28.dp.toPx() * (1f - p)).coerceAtLeast(0f)
+                            shape = RoundedCornerShape(topStart = cornerPx, topEnd = cornerPx)
+                            clip = cornerPx > 0.5f
+                        }
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            onClick = {},
+                        )
+                        .then(fullDragDownModifier),
                 ) {
-                    when (renderedSheetOverlay) {
-                        PlayerOverlayPane.QUEUE -> MupaQueueOverlay(
-                            queue = playerState.queue,
-                            currentIndex = playerState.currentIndex,
-                            stripArtistName = stripArtistName,
-                            onSelectIndex = onSelectQueueIndex,
-                            onMoveItem = onMoveQueueItem,
-                            onRemoveItem = onRemoveQueueItem,
-                            onClearUpcoming = onClearUpcomingQueue,
-                            onClose = onCloseOverlay,
-                        )
-                        PlayerOverlayPane.EQUALIZER -> MupaEqualizerOverlay(
-                            activePreset = playerState.eqPreset,
-                            bandGainsDb = playerState.eqGainsDb,
-                            onSelectPreset = onSelectEqPreset,
-                            onBandGainChange = onEqBandChange,
-                            onReset = onResetEq,
-                            onClose = onCloseOverlay,
-                        )
-                        else -> Unit
+                    // Latar penuh sampul lagu yang di-blur (0 garis hitam!)
+                    FullBleedBlurredCoverBackdrop(
+                        artworkUrl = track.artworkUrl,
+                        topScrimAlpha = 0.34f,
+                        midScrimAlpha = 0.46f,
+                        bottomScrimAlpha = 0.80f,
+                    )
+
+                    FullNowPlayingContent(
+                        track = track,
+                        stripArtistName = stripArtistName,
+                        playerState = playerState,
+                        progressProvider = progressProvider,
+                        positionProvider = positionProvider,
+                        maxWidthDp = containerMaxWidth,
+                        onCollapse = { sheetState.collapse() },
+                        onTogglePlayPause = onTogglePlayPause,
+                        onSeekTo = onSeekTo,
+                        onSkipNext = onSkipNext,
+                        onSkipPrevious = onSkipPrevious,
+                        onToggleShuffle = onToggleShuffle,
+                        onCycleRepeat = onCycleRepeat,
+                        onToggleFavorite = onToggleFavorite,
+                        onToggleLyrics = { onOpenOverlay(PlayerOverlayPane.LYRICS) },
+                        onRetryLyrics = onRetryLyrics,
+                        onOpenQueue = { onOpenOverlay(PlayerOverlayPane.QUEUE) },
+                        onOpenEqualizer = { onOpenOverlay(PlayerOverlayPane.EQUALIZER) },
+                        onOpenCinema = onOpenCinema,
+                        onAdjustLyricsOffset = onAdjustLyricsOffset,
+                        onResetLyricsOffset = onResetLyricsOffset,
+                        onCycleSleepTimer = onCycleSleepTimer,
+                        modifier = Modifier.fillMaxSize(),
+                    )
+
+                    // Sheet Antrean & Equalizer
+                    AnimatedVisibility(
+                        visible = sheetOverlayVisible && sheetState.isExpanded,
+                        enter = slideInVertically(
+                            animationSpec = MupaMotion.emphasizedTween(MupaMotion.DurationSheetMs),
+                            initialOffsetY = { it / 6 },
+                        ) + fadeIn(MupaMotion.standardTween(MupaMotion.DurationShortMs)),
+                        exit = slideOutVertically(
+                            animationSpec = MupaMotion.emphasizedTween(MupaMotion.DurationShortMs),
+                            targetOffsetY = { it / 8 },
+                        ) + fadeOut(MupaMotion.standardTween(MupaMotion.DurationShortMs)),
+                    ) {
+                        when (renderedSheetOverlay) {
+                            PlayerOverlayPane.QUEUE -> MupaQueueOverlay(
+                                queue = playerState.queue,
+                                currentIndex = playerState.currentIndex,
+                                stripArtistName = stripArtistName,
+                                onSelectIndex = onSelectQueueIndex,
+                                onMoveItem = onMoveQueueItem,
+                                onRemoveItem = onRemoveQueueItem,
+                                onClearUpcoming = onClearUpcomingQueue,
+                                onClose = onCloseOverlay,
+                            )
+                            PlayerOverlayPane.EQUALIZER -> MupaEqualizerOverlay(
+                                activePreset = playerState.eqPreset,
+                                bandGainsDb = playerState.eqGainsDb,
+                                onSelectPreset = onSelectEqPreset,
+                                onBandGainChange = onEqBandChange,
+                                onReset = onResetEq,
+                                onClose = onCloseOverlay,
+                            )
+                            else -> Unit
+                        }
                     }
                 }
             }
 
-            // Lapisan 5: Mode Cinema Layar Penuh (transisi halus tanpa lompatan)
+            // 3. Mode Cinema Layar Penuh (full-bleed blurred cover, transisi fade halus tanpa lompatan)
             AnimatedVisibility(
                 visible = playerState.isCinemaMode,
-                enter = fadeIn(MupaMotion.emphasizedTween(MupaMotion.DurationMediumMs)) +
-                    slideInVertically(MupaMotion.emphasizedTween(MupaMotion.DurationMediumMs)) { it / 18 },
-                exit = fadeOut(MupaMotion.standardTween(MupaMotion.DurationShortMs)) +
-                    slideOutVertically(MupaMotion.standardTween(MupaMotion.DurationShortMs)) { it / 18 },
+                enter = fadeIn(MupaMotion.emphasizedTween(280)),
+                exit = fadeOut(MupaMotion.standardTween(200)),
             ) {
                 MupaCinemaOverlay(
                     track = track,
@@ -590,6 +540,7 @@ internal fun FullNowPlayingContent(
     onCycleRepeat: () -> Unit,
     onToggleFavorite: () -> Unit,
     onToggleLyrics: () -> Unit,
+    onRetryLyrics: () -> Unit = {},
     onOpenQueue: () -> Unit,
     onOpenEqualizer: () -> Unit,
     onOpenCinema: () -> Unit,
@@ -714,43 +665,36 @@ internal fun FullNowPlayingContent(
                         onSeekTo = onSeekTo,
                         onAdjustOffset = onAdjustLyricsOffset,
                         onResetOffset = onResetLyricsOffset,
-                        onRetry = onToggleLyrics,
+                        onRetry = onRetryLyrics,
                         modifier = Modifier.fillMaxSize(),
                     )
                 } else {
-                    val coverSize = (maxWidthDp - 48.dp).coerceIn(220.dp, 340.dp)
-                    val coverTint = appearance.effectiveCoverAccent.primary
+                    val coverSize = (maxWidthDp - 40.dp).coerceIn(240.dp, 360.dp)
+                    val playScale by animateFloatAsState(
+                        targetValue = if (playerState.isPlaying) 1f else 0.94f,
+                        animationSpec = MupaMotion.emphasizedTween(280),
+                        label = "coverBreathScale",
+                    )
                     Box(
                         modifier = Modifier
                             .size(coverSize)
-                            .drawBehind {
-                                if (!appearance.isOledMode && !appearance.isPerformanceMode) {
-                                    drawCircle(
-                                        brush = Brush.radialGradient(
-                                            colors = listOf(
-                                                coverTint.copy(alpha = 0.24f),
-                                                Color.Transparent,
-                                            ),
-                                            center = Offset(size.width * 0.5f, size.height * 0.58f),
-                                            radius = size.width * 0.64f,
-                                        ),
-                                    )
-                                }
-                            }
                             .graphicsLayer {
-                                val p = progressProvider()
-                                val s = 0.92f + 0.08f * p
-                                scaleX = s
-                                scaleY = s
-                            },
+                                scaleX = playScale
+                                scaleY = playScale
+                            }
+                            .clickable(
+                                interactionSource = remember { MutableInteractionSource() },
+                                indication = null,
+                                onClick = onToggleLyrics,
+                            ),
                         contentAlignment = Alignment.Center,
                     ) {
                         MupaArtworkBox(
                             artworkUrl = track.artworkUrl,
                             contentDescription = disp.title,
                             size = coverSize,
-                            shape = MupaRadii.ArtworkLarge,
-                            iconSize = 68.dp,
+                            shape = RoundedCornerShape(24.dp),
+                            iconSize = 72.dp,
                         )
                     }
                 }
@@ -853,9 +797,9 @@ internal fun FullNowPlayingContent(
             }
             Box(
                 modifier = Modifier
-                    .size(72.dp)
+                    .size(68.dp)
                     .clip(CircleShape)
-                    .background(MupaPalette.CoralPrimary)
+                    .background(Color.White)
                     .clickable(onClick = onTogglePlayPause),
                 contentAlignment = Alignment.Center,
             ) {
@@ -870,7 +814,7 @@ internal fun FullNowPlayingContent(
                         imageVector = if (playerState.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
                         contentDescription = if (playerState.isPlaying) "Jeda" else "Putar",
                         tint = MupaPalette.LogoCharcoal,
-                        modifier = Modifier.size(36.dp),
+                        modifier = Modifier.size(34.dp),
                     )
                 }
             }

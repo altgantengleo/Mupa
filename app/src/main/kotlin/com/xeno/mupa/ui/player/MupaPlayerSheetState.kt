@@ -43,6 +43,7 @@ class MupaPlayerSheetState(
 
     val isExpanded: Boolean by derivedStateOf { animatable.value > 0.5f }
     val isCollapsed: Boolean by derivedStateOf { animatable.value < 0.02f }
+    val isVisible: Boolean by derivedStateOf { animatable.value > 0.001f }
     val isSettledExpanded: Boolean by derivedStateOf { animatable.value > 0.98f }
 
     fun expand() {

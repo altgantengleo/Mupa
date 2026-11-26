@@ -17,7 +17,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -36,6 +35,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -43,6 +43,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
@@ -51,6 +52,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -64,7 +66,6 @@ import com.xeno.mupa.core.designsystem.theme.MupaMotion
 import com.xeno.mupa.core.designsystem.theme.MupaPalette
 import com.xeno.mupa.core.designsystem.theme.MupaRadii
 import com.xeno.mupa.core.model.AudioSourceType
-import com.xeno.mupa.core.model.LyricsLine
 import com.xeno.mupa.core.model.Track
 import com.xeno.mupa.core.model.TrackDisplayRules
 import kotlinx.coroutines.Dispatchers
@@ -73,12 +74,102 @@ import kotlinx.coroutines.withContext
 import java.io.File
 
 /**
- * Mode Cinema imersif layar penuh (perbaikan B11):
- * - Backdrop = cover yang di-blur SEKALI dan di-cache di memori (bukan blur live per frame) + scrim gradasi.
- * - Mode OLED = hitam pekat #000000 tanpa blur.
- * - Jika lirik tersedia: tampilkan lirik sinkron besar di tengah; jika tidak: cover besar + judul & artis.
- * - Kontrol minimal (Play/Pause + seek tipis) memudar otomatis setelah 3 detik tanpa sentuhan; tap untuk tampilkan lagi.
- * - Keluar lewat drag ke bawah atau tombol Back (bertahap: Cinema -> Full -> Mini).
+ * Latar belakang penuh (full-bleed edge-to-edge) dari sampul lagu yang di-blur satu kali & di-cache.
+ * - Mengisi 100% layar tanpa garis hitam atas/bawah.
+ * - Mode OLED tetap memakai hitam murni #000000.
+ */
+@Composable
+fun FullBleedBlurredCoverBackdrop(
+    artworkUrl: String?,
+    modifier: Modifier = Modifier,
+    topScrimAlpha: Float = 0.34f,
+    midScrimAlpha: Float = 0.46f,
+    bottomScrimAlpha: Float = 0.78f,
+) {
+    val appearance = LocalMupaAppearance.current
+    val context = LocalContext.current
+
+    if (appearance.isOledMode) {
+        Box(modifier = modifier.fillMaxSize().background(MupaPalette.OledBackground))
+        return
+    }
+
+    var blurredBitmap by remember(artworkUrl) { mutableStateOf<Bitmap?>(null) }
+
+    LaunchedEffect(artworkUrl, appearance.isPerformanceMode) {
+        if (appearance.isPerformanceMode || artworkUrl.isNullOrBlank()) {
+            blurredBitmap = null
+            return@LaunchedEffect
+        }
+        blurredBitmap = withContext(Dispatchers.IO) {
+            runCatching {
+                val model: Any = if (artworkUrl.startsWith("/")) File(artworkUrl) else artworkUrl
+                val loader = SingletonImageLoader.get(context)
+                val req = ImageRequest.Builder(context)
+                    .data(model)
+                    .size(128)
+                    .allowHardware(false)
+                    .build()
+                val raw = loader.execute(req).image?.toBitmap() ?: return@runCatching null
+                fastBoxBlurOnce(raw, radius = 10)
+            }.getOrNull()
+        }
+    }
+
+    val coverAccent = appearance.effectiveCoverAccent
+    val imageAlpha by animateFloatAsState(
+        targetValue = if (blurredBitmap != null) 1f else 0f,
+        animationSpec = MupaMotion.standardTween(MupaMotion.DurationMediumMs),
+        label = "fullBleedBackdropAlpha",
+    )
+
+    Box(
+        modifier = modifier
+            .fillMaxSize()
+            .background(
+                Brush.linearGradient(
+                    colors = listOf(
+                        coverAccent.primary.copy(alpha = 0.42f),
+                        Color(0xFF1D1820),
+                        Color(0xFF121216),
+                    ),
+                    start = Offset(0f, 0f),
+                    end = Offset(0f, 1600f),
+                ),
+            ),
+    ) {
+        blurredBitmap?.let { bmp ->
+            Image(
+                bitmap = bmp.asImageBitmap(),
+                contentDescription = null,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .graphicsLayer {
+                        alpha = imageAlpha
+                        scaleX = 1.18f
+                        scaleY = 1.18f
+                    },
+            )
+        }
+
+        // Scrim lembut agar teks putih/krem selalu kontras tajam tanpa garis hitam kaku
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        0.0f to Color.Black.copy(alpha = topScrimAlpha),
+                        0.45f to Color.Black.copy(alpha = midScrimAlpha),
+                        1.0f to Color.Black.copy(alpha = bottomScrimAlpha),
+                    ),
+                ),
+        )
+    }
+}
+
+/**
+ * Mode Cinema layar penuh (full-bleed cover art blurred backdrop + lirik besar atau cover imersif).
  */
 @Composable
 fun MupaCinemaOverlay(
@@ -93,34 +184,8 @@ fun MupaCinemaOverlay(
     onExitCinema: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val appearance = LocalMupaAppearance.current
-    val context = LocalContext.current
     val display = remember(track, stripArtistName) {
         TrackDisplayRules.formatTrack(track, stripArtistName)
-    }
-
-    // Cache one-shot blurred cover bitmap (tidak pernah blur live tiap frame)
-    var cachedBlurredBackdrop by remember(track.artworkUrl, appearance.isOledMode) {
-        mutableStateOf<Bitmap?>(null)
-    }
-    LaunchedEffect(track.artworkUrl, appearance.isOledMode, appearance.isPerformanceMode) {
-        if (appearance.isOledMode || appearance.isPerformanceMode || track.artworkUrl.isNullOrBlank()) {
-            cachedBlurredBackdrop = null
-            return@LaunchedEffect
-        }
-        cachedBlurredBackdrop = withContext(Dispatchers.IO) {
-            runCatching {
-                val model: Any = if (track.artworkUrl!!.startsWith("/")) File(track.artworkUrl!!) else track.artworkUrl!!
-                val loader = SingletonImageLoader.get(context)
-                val req = ImageRequest.Builder(context)
-                    .data(model)
-                    .size(96)
-                    .allowHardware(false)
-                    .build()
-                val rawBitmap = loader.execute(req).image?.toBitmap() ?: return@runCatching null
-                fastBoxBlurOnce(rawBitmap, radius = 8)
-            }.getOrNull()
-        }
     }
 
     var controlsVisible by remember { mutableStateOf(true) }
@@ -128,18 +193,17 @@ fun MupaCinemaOverlay(
 
     LaunchedEffect(controlsVisible, lastTouchMs, playerState.isPlaying) {
         if (controlsVisible && playerState.isPlaying) {
-            delay(3_000L)
+            delay(3_500L)
             controlsVisible = false
         }
     }
 
-    var dragAccumY by remember { mutableStateOf(0f) }
+    var dragAccumY by remember { mutableFloatStateOf(0f) }
 
     Box(
         modifier = modifier
             .fillMaxSize()
             .testTag("mupa_cinema_overlay")
-            .background(if (appearance.isOledMode) MupaPalette.OledBackground else MupaPalette.Background)
             .pointerInput(onExitCinema) {
                 detectVerticalDragGestures(
                     onDragStart = { dragAccumY = 0f },
@@ -160,98 +224,55 @@ fun MupaCinemaOverlay(
                 lastTouchMs = System.currentTimeMillis()
             },
     ) {
-        // Backdrop blurred one-shot fade-in halus + scrim gradasi (tidak pernah pop mendadak)
-        val backdropAlpha by animateFloatAsState(
-            targetValue = if (cachedBlurredBackdrop != null) 1f else 0f,
-            animationSpec = MupaMotion.standardTween(MupaMotion.DurationMediumMs),
-            label = "cinemaBackdropAlpha",
+        // Full-bleed blurred album art backdrop (0 garis hitam!)
+        FullBleedBlurredCoverBackdrop(
+            artworkUrl = track.artworkUrl,
+            topScrimAlpha = 0.36f,
+            midScrimAlpha = 0.44f,
+            bottomScrimAlpha = 0.72f,
         )
-        cachedBlurredBackdrop?.let { bmp ->
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .graphicsLayer { alpha = backdropAlpha },
-            ) {
-                Image(
-                    bitmap = bmp.asImageBitmap(),
-                    contentDescription = null,
-                    contentScale = ContentScale.Crop,
-                    modifier = Modifier.fillMaxSize(),
-                )
-                Box(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .background(
-                            Brush.verticalGradient(
-                                0.0f to Color.Black.copy(alpha = 0.65f),
-                                0.45f to Color.Black.copy(alpha = 0.58f),
-                                1.0f to Color.Black.copy(alpha = 0.86f),
-                            ),
-                        ),
-                )
-            }
-        }
 
-        // Konten utama Cinema: lirik besar atau cover besar + judul
+        // Konten utama Cinema: lirik besar di atas full-bleed cover, atau cover besar + judul
         if (playerState.lyrics.isNotEmpty()) {
-            val edgeColor = if (appearance.isOledMode) MupaPalette.OledBackground else MupaPalette.Background
-            Box(
+            MupaSyncedLyricsList(
+                lines = playerState.lyrics,
+                isPlain = playerState.lyricsIsPlain,
+                positionProvider = positionProvider,
+                offsetMs = playerState.lyricsOffsetMs,
+                isCinemaScale = true,
+                onSeekTo = {
+                    lastTouchMs = System.currentTimeMillis()
+                    onSeekTo(it)
+                },
                 modifier = Modifier
                     .fillMaxSize()
                     .statusBarsPadding()
                     .navigationBarsPadding()
                     .padding(top = 68.dp, bottom = 168.dp),
-            ) {
-                MupaSyncedLyricsList(
-                    lines = playerState.lyrics,
-                    isPlain = playerState.lyricsIsPlain,
-                    positionProvider = positionProvider,
-                    offsetMs = playerState.lyricsOffsetMs,
-                    isCinemaScale = true,
-                    onSeekTo = {
-                        lastTouchMs = System.currentTimeMillis()
-                        onSeekTo(it)
-                    },
-                    modifier = Modifier.fillMaxSize(),
-                )
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .fillMaxWidth()
-                        .height(28.dp)
-                        .background(Brush.verticalGradient(listOf(edgeColor.copy(alpha = 0.92f), Color.Transparent))),
-                )
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .fillMaxWidth()
-                        .height(36.dp)
-                        .background(Brush.verticalGradient(listOf(Color.Transparent, edgeColor.copy(alpha = 0.95f)))),
-                )
-            }
+            )
         } else {
             Column(
                 modifier = Modifier
                     .align(Alignment.Center)
                     .padding(horizontal = 32.dp),
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(20.dp),
+                verticalArrangement = Arrangement.spacedBy(22.dp),
             ) {
                 MupaArtworkBox(
                     artworkUrl = track.artworkUrl,
                     contentDescription = display.title,
-                    size = 256.dp,
+                    size = 276.dp,
                     shape = MupaRadii.ArtworkLarge,
-                    iconSize = 64.dp,
+                    iconSize = 68.dp,
                 )
                 Column(
                     horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
                 ) {
                     Text(
                         text = display.title,
-                        style = MaterialTheme.typography.headlineSmall,
-                        color = MupaPalette.LogoCream,
+                        style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
+                        color = Color.White,
                         textAlign = TextAlign.Center,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
@@ -259,7 +280,7 @@ fun MupaCinemaOverlay(
                     Text(
                         text = display.subtitle,
                         style = MaterialTheme.typography.bodyLarge,
-                        color = MupaPalette.TextSecondary,
+                        color = Color.White.copy(alpha = 0.78f),
                         textAlign = TextAlign.Center,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
@@ -268,7 +289,7 @@ fun MupaCinemaOverlay(
             }
         }
 
-        // Top bar & kontrol minimal yang memudar setelah 3 detik idle
+        // Kontrol minimal auto-fade 3.5 detik
         AnimatedVisibility(
             visible = controlsVisible,
             enter = fadeIn(MupaMotion.standardTween(MupaMotion.DurationShortMs)),
@@ -296,7 +317,7 @@ fun MupaCinemaOverlay(
                         Icon(
                             imageVector = Icons.Rounded.KeyboardArrowDown,
                             contentDescription = "Keluar dari mode Cinema",
-                            tint = MupaPalette.LogoCream,
+                            tint = Color.White,
                             modifier = Modifier.size(28.dp),
                         )
                     }
@@ -304,12 +325,12 @@ fun MupaCinemaOverlay(
                         Text(
                             text = "CINEMA",
                             style = MaterialTheme.typography.labelSmall,
-                            color = MupaPalette.TextSecondary,
+                            color = Color.White.copy(alpha = 0.72f),
                         )
                         Text(
                             text = display.title,
                             style = MaterialTheme.typography.titleSmall,
-                            color = MupaPalette.LogoCream,
+                            color = Color.White,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
                         )
@@ -317,7 +338,6 @@ fun MupaCinemaOverlay(
                     Spacer(modifier = Modifier.size(48.dp))
                 }
 
-                // Kontrol minimal bawah: seekbar tipis + Prev / Play-Pause / Next
                 Column(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
@@ -340,7 +360,7 @@ fun MupaCinemaOverlay(
 
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(24.dp),
+                        horizontalArrangement = Arrangement.spacedBy(28.dp),
                     ) {
                         IconButton(
                             onClick = {
@@ -351,16 +371,17 @@ fun MupaCinemaOverlay(
                         ) {
                             Icon(
                                 imageVector = Icons.Rounded.SkipPrevious,
-                                contentDescription = "Lagu sebelumnya",
-                                tint = MupaPalette.LogoCream,
-                                modifier = Modifier.size(30.dp),
+                                contentDescription = "Sebelumnya",
+                                tint = Color.White,
+                                modifier = Modifier.size(32.dp),
                             )
                         }
+
                         Box(
                             modifier = Modifier
-                                .size(60.dp)
+                                .size(64.dp)
                                 .clip(CircleShape)
-                                .background(MupaPalette.CoralPrimary)
+                                .background(Color.White)
                                 .clickable {
                                     lastTouchMs = System.currentTimeMillis()
                                     onTogglePlayPause()
@@ -371,9 +392,10 @@ fun MupaCinemaOverlay(
                                 imageVector = if (playerState.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
                                 contentDescription = if (playerState.isPlaying) "Jeda" else "Putar",
                                 tint = MupaPalette.LogoCharcoal,
-                                modifier = Modifier.size(30.dp),
+                                modifier = Modifier.size(32.dp),
                             )
                         }
+
                         IconButton(
                             onClick = {
                                 lastTouchMs = System.currentTimeMillis()
@@ -383,9 +405,9 @@ fun MupaCinemaOverlay(
                         ) {
                             Icon(
                                 imageVector = Icons.Rounded.SkipNext,
-                                contentDescription = "Lagu berikutnya",
-                                tint = MupaPalette.LogoCream,
-                                modifier = Modifier.size(30.dp),
+                                contentDescription = "Berikutnya",
+                                tint = Color.White,
+                                modifier = Modifier.size(32.dp),
                             )
                         }
                     }
@@ -396,59 +418,61 @@ fun MupaCinemaOverlay(
 }
 
 /**
- * Box blur cepat 2-pass pada bitmap kecil (<= 96px) yang dipanggil SEKALI saat ganti lagu.
+ * Box blur cepat 2-pass pada bitmap kecil (<=128px) satu kali di Dispatchers.IO.
  */
 internal fun fastBoxBlurOnce(source: Bitmap, radius: Int): Bitmap {
+    val safeRadius = radius.coerceIn(2, 16)
     val w = source.width.coerceAtLeast(1)
     val h = source.height.coerceAtLeast(1)
+    val working = if (source.config == Bitmap.Config.ARGB_8888) {
+        source.copy(Bitmap.Config.ARGB_8888, true)
+    } else {
+        source.copy(Bitmap.Config.ARGB_8888, true)
+    }
     val pixels = IntArray(w * h)
-    source.getPixels(pixels, 0, w, 0, 0, w, h)
     val temp = IntArray(w * h)
-    val r = radius.coerceIn(1, 16)
-    val window = r * 2 + 1
+    working.getPixels(pixels, 0, w, 0, 0, w, h)
 
-    // Pass horizontal
-    for (y in 0 until h) {
-        val rowOff = y * w
-        for (x in 0 until w) {
-            var aSum = 0
-            var rSum = 0
-            var gSum = 0
-            var bSum = 0
-            for (k in -r..r) {
-                val sx = (x + k).coerceIn(0, w - 1)
-                val px = pixels[rowOff + sx]
-                aSum += (px ushr 24) and 0xFF
-                rSum += (px ushr 16) and 0xFF
-                gSum += (px ushr 8) and 0xFF
-                bSum += px and 0xFF
-            }
-            temp[rowOff + x] = ((aSum / window) shl 24) or
-                ((rSum / window) shl 16) or
-                ((gSum / window) shl 8) or
-                (bSum / window)
-        }
-    }
-    // Pass vertikal
-    for (x in 0 until w) {
+    repeat(2) {
         for (y in 0 until h) {
-            var aSum = 0
-            var rSum = 0
-            var gSum = 0
-            var bSum = 0
-            for (k in -r..r) {
-                val sy = (y + k).coerceIn(0, h - 1)
-                val px = temp[sy * w + x]
-                aSum += (px ushr 24) and 0xFF
-                rSum += (px ushr 16) and 0xFF
-                gSum += (px ushr 8) and 0xFF
-                bSum += px and 0xFF
+            val rowOff = y * w
+            for (x in 0 until w) {
+                var r = 0
+                var g = 0
+                var b = 0
+                var count = 0
+                val x0 = (x - safeRadius).coerceAtLeast(0)
+                val x1 = (x + safeRadius).coerceAtMost(w - 1)
+                for (kx in x0..x1) {
+                    val p = pixels[rowOff + kx]
+                    r += (p shr 16) and 0xFF
+                    g += (p shr 8) and 0xFF
+                    b += p and 0xFF
+                    count++
+                }
+                temp[rowOff + x] = (0xFF shl 24) or ((r / count) shl 16) or ((g / count) shl 8) or (b / count)
             }
-            pixels[y * w + x] = ((aSum / window) shl 24) or
-                ((rSum / window) shl 16) or
-                ((gSum / window) shl 8) or
-                (bSum / window)
+        }
+        for (x in 0 until w) {
+            for (y in 0 until h) {
+                var r = 0
+                var g = 0
+                var b = 0
+                var count = 0
+                val y0 = (y - safeRadius).coerceAtLeast(0)
+                val y1 = (y + safeRadius).coerceAtMost(h - 1)
+                for (ky in y0..y1) {
+                    val p = temp[ky * w + x]
+                    r += (p shr 16) and 0xFF
+                    g += (p shr 8) and 0xFF
+                    b += p and 0xFF
+                    count++
+                }
+                pixels[y * w + x] = (0xFF shl 24) or ((r / count) shl 16) or ((g / count) shl 8) or (b / count)
+            }
         }
     }
-    return Bitmap.createBitmap(pixels, w, h, Bitmap.Config.ARGB_8888)
+
+    working.setPixels(pixels, 0, w, 0, 0, w, h)
+    return working
 }

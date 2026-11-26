@@ -111,9 +111,7 @@ class MupaPlayerViewModel @Inject constructor(
                     viewModelScope.launch { localLibraryRepository.recordPlay(track.id) }
                 }
                 persistCurrentQueue()
-                if (_uiState.value.activeOverlay == PlayerOverlayPane.LYRICS || _uiState.value.isCinemaMode) {
-                    fetchLyricsForCurrentTrack()
-                }
+                fetchLyricsForCurrentTrack()
             }
         }
 
@@ -332,9 +330,8 @@ class MupaPlayerViewModel @Inject constructor(
             ctrl.prepare()
             ctrl.play()
         }
-        if (_uiState.value.activeOverlay == PlayerOverlayPane.LYRICS || _uiState.value.isCinemaMode) {
-            fetchLyricsForCurrentTrack()
-        }
+        // Pre-fetch lirik proaktif di latar belakang agar langsung siap saat buka Lirik/Cinema
+        fetchLyricsForCurrentTrack()
     }
 
     fun togglePlayPause() {
@@ -466,8 +463,8 @@ class MupaPlayerViewModel @Inject constructor(
     fun openOverlay(pane: PlayerOverlayPane) {
         val target = if (_uiState.value.activeOverlay == pane) PlayerOverlayPane.NONE else pane
         _uiState.update { it.copy(activeOverlay = target) }
-        if (target == PlayerOverlayPane.LYRICS) {
-            fetchLyricsForCurrentTrack()
+        if (target == PlayerOverlayPane.LYRICS && _uiState.value.lyrics.isEmpty() && !_uiState.value.lyricsLoading) {
+            fetchLyricsForCurrentTrack(forceRefresh = true)
         }
     }
 
