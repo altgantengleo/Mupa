@@ -71,6 +71,9 @@ class MainActivity : ComponentActivity() {
                     onToggleFavorite = playerViewModel::toggleFavoriteCurrent,
                     onOpenOverlay = playerViewModel::openOverlay,
                     onCloseOverlay = playerViewModel::closeOverlay,
+                    onOpenCinema = playerViewModel::openCinemaMode,
+                    onCloseCinema = playerViewModel::closeCinemaMode,
+                    positionProvider = playerViewModel::currentPlaybackPositionMs,
                     onAdjustLyricsOffset = playerViewModel::adjustLyricsOffset,
                     onResetLyricsOffset = playerViewModel::resetLyricsOffset,
                     onCycleSleepTimer = playerViewModel::cycleSleepTimer,
@@ -80,6 +83,7 @@ class MainActivity : ComponentActivity() {
                     onSelectQueueIndex = playerViewModel::selectQueueIndex,
                     onMoveQueueItem = playerViewModel::moveQueueItem,
                     onRemoveQueueItem = playerViewModel::removeQueueItem,
+                    onClearUpcomingQueue = playerViewModel::clearUpcomingQueue,
                 )
             }
         }

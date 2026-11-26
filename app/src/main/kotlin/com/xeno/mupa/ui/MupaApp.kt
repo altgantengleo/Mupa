@@ -73,6 +73,9 @@ fun MupaApp(
     onToggleFavorite: () -> Unit,
     onOpenOverlay: (PlayerOverlayPane) -> Unit,
     onCloseOverlay: () -> Unit,
+    onOpenCinema: () -> Unit = {},
+    onCloseCinema: () -> Unit = {},
+    positionProvider: () -> Long = { playerState.positionMs },
     onAdjustLyricsOffset: (Long) -> Unit,
     onResetLyricsOffset: () -> Unit,
     onCycleSleepTimer: () -> Unit,
@@ -82,6 +85,7 @@ fun MupaApp(
     onSelectQueueIndex: (Int) -> Unit,
     onMoveQueueItem: (Int, Int) -> Unit,
     onRemoveQueueItem: (Int) -> Unit,
+    onClearUpcomingQueue: () -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     if (!uiState.isReady) {
@@ -211,7 +215,9 @@ fun MupaApp(
                 MupaPlayerOverlayHost(
                     playerState = playerState,
                     sheetState = playerSheetState,
+                    stripArtistName = uiState.preferences.stripArtistName,
                     bottomBarClearance = navBarBottom + 64.dp + 12.dp + 8.dp,
+                    positionProvider = positionProvider,
                     onTogglePlayPause = onTogglePlayPause,
                     onSeekTo = onSeekTo,
                     onSkipNext = onSkipNext,
@@ -221,6 +227,8 @@ fun MupaApp(
                     onToggleFavorite = onToggleFavorite,
                     onOpenOverlay = onOpenOverlay,
                     onCloseOverlay = onCloseOverlay,
+                    onOpenCinema = onOpenCinema,
+                    onCloseCinema = onCloseCinema,
                     onAdjustLyricsOffset = onAdjustLyricsOffset,
                     onResetLyricsOffset = onResetLyricsOffset,
                     onCycleSleepTimer = onCycleSleepTimer,
@@ -230,6 +238,7 @@ fun MupaApp(
                     onSelectQueueIndex = onSelectQueueIndex,
                     onMoveQueueItem = onMoveQueueItem,
                     onRemoveQueueItem = onRemoveQueueItem,
+                    onClearUpcomingQueue = onClearUpcomingQueue,
                 )
 
                 val navSlidePx = with(density) { (navBarBottom + 88.dp).toPx() }
