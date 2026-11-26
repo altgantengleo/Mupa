@@ -15,11 +15,13 @@ import com.google.common.util.concurrent.ListenableFuture
 import com.xeno.mupa.core.model.AudioSourceType
 import com.xeno.mupa.core.model.Track
 import com.xeno.mupa.data.local.LocalLibraryRepository
+import com.xeno.mupa.data.lyrics.LyricsRepository
+import com.xeno.mupa.data.lyrics.LyricsRequest
 import com.xeno.mupa.playback.MupaPlaybackService
 import com.xeno.mupa.playback.QueuePersistenceStore
 import com.xeno.mupa.playback.eq.EqPreset
 import com.xeno.mupa.playback.eq.FiveBandEqualizerProcessor
-import com.xeno.mupa.streaming.api.StreamingLyricsProvider
+import com.xeno.mupa.streaming.api.StreamingError
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -42,7 +44,7 @@ class MupaPlayerViewModel @Inject constructor(
     @ApplicationContext private val appContext: Context,
     private val queueStore: QueuePersistenceStore,
     private val equalizerProcessor: FiveBandEqualizerProcessor,
-    private val lyricsProvider: StreamingLyricsProvider,
+    private val lyricsRepository: LyricsRepository,
     private val localLibraryRepository: LocalLibraryRepository,
 ) : ViewModel() {
 
@@ -503,19 +505,27 @@ class MupaPlayerViewModel @Inject constructor(
         selectEqPreset(EqPreset.FLAT)
     }
 
-    fun fetchLyricsForCurrentTrack() {
+    fun fetchLyricsForCurrentTrack(forceRefresh: Boolean = false) {
         val track = _uiState.value.currentTrack ?: return
         lyricsFetchJob?.cancel()
         lyricsFetchJob = viewModelScope.launch {
             _uiState.update { it.copy(lyricsLoading = true, lyricsError = null) }
-            lyricsProvider.fetchLyrics(track.title, track.artistName, track.durationMs)
-                .onSuccess { remoteLines ->
+            val request = LyricsRequest(
+                trackId = track.id,
+                title = track.title,
+                artistName = track.artistName,
+                albumTitle = track.albumTitle,
+                durationMs = _uiState.value.durationMs.takeIf { it > 0L } ?: track.durationMs,
+                sourceType = track.sourceType,
+            )
+            lyricsRepository.getLyrics(request, forceRefresh = forceRefresh)
+                .onSuccess { doc ->
                     if (_uiState.value.currentTrack?.id == track.id) {
-                        val isPlain = remoteLines.isNotEmpty() && remoteLines.all { it.timestampMs == 0L }
                         _uiState.update {
                             it.copy(
-                                lyrics = remoteLines,
-                                lyricsIsPlain = isPlain,
+                                lyrics = doc.lines,
+                                lyricsIsPlain = !doc.isSynced,
+                                lyricsProviderLabel = doc.providerLabel,
                                 lyricsLoading = false,
                                 lyricsError = null,
                             )
@@ -524,11 +534,24 @@ class MupaPlayerViewModel @Inject constructor(
                 }
                 .onFailure { err ->
                     if (_uiState.value.currentTrack?.id == track.id) {
-                        _uiState.update {
-                            it.copy(
-                                lyricsLoading = false,
-                                lyricsError = err.message ?: "Gagal memuat lirik.",
-                            )
+                        if (err is StreamingError.Unavailable) {
+                            // Tidak ditemukan -> tampilkan status kosong rapi (bukan error jaringan)
+                            _uiState.update {
+                                it.copy(
+                                    lyrics = emptyList(),
+                                    lyricsIsPlain = false,
+                                    lyricsProviderLabel = null,
+                                    lyricsLoading = false,
+                                    lyricsError = null,
+                                )
+                            }
+                        } else {
+                            _uiState.update {
+                                it.copy(
+                                    lyricsLoading = false,
+                                    lyricsError = err.message ?: "Gagal memuat lirik.",
+                                )
+                            }
                         }
                     }
                 }

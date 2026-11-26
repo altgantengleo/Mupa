@@ -136,8 +136,12 @@ object AppInfrastructureModule {
 
     @Provides
     @Singleton
-    fun provideLyricsProvider(client: OkHttpClient): StreamingLyricsProvider =
+    fun provideLrcLibLyricsProvider(client: OkHttpClient): LrcLibLyricsProvider =
         LrcLibLyricsProvider(client)
+
+    @Provides
+    @Singleton
+    fun provideLyricsProvider(lrcLib: LrcLibLyricsProvider): StreamingLyricsProvider = lrcLib
 
     @Provides
     @Singleton

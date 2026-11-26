@@ -46,6 +46,7 @@ import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
@@ -311,6 +312,7 @@ fun MupaSyncedLyricsList(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .then(if (isActive) Modifier.testTag("mupa_lyrics_active_line") else Modifier)
                     .clip(MupaRadii.ArtworkSmall)
                     .clickable(enabled = !isPlain) { onSeekTo(line.timestampMs) }
                     .graphicsLayer {

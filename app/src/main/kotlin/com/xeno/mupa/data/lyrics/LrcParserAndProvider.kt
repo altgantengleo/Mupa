@@ -1,12 +1,17 @@
 package com.xeno.mupa.data.lyrics
 
+import com.xeno.mupa.core.model.AudioSourceType
 import com.xeno.mupa.core.model.LyricsLine
+import com.xeno.mupa.core.model.LyricsWord
+import com.xeno.mupa.core.model.TrackDisplayRules
 import com.xeno.mupa.streaming.api.StreamingError
 import com.xeno.mupa.streaming.api.StreamingLyricsProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -14,120 +19,407 @@ import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import java.io.IOException
+import java.util.concurrent.TimeUnit
+import kotlin.math.abs
+import kotlin.math.roundToLong
+
+data class LyricsRequest(
+    val trackId: String,
+    val title: String,
+    val artistName: String,
+    val albumTitle: String? = null,
+    val durationMs: Long = 0L,
+    val sourceType: AudioSourceType = AudioSourceType.STREAMING,
+)
+
+data class LyricsDocument(
+    val lines: List<LyricsLine>,
+    val rawText: String,
+    val isSynced: Boolean,
+    val providerId: String,
+    val providerLabel: String,
+)
+
+data class ParsedLyrics(
+    val lines: List<LyricsLine>,
+    val isSynced: Boolean,
+)
 
 /**
- * Parser LRC tersinkron (mendukung [mm:ss.xx], [mm:ss:xxx], multi-timestamp per baris,
- * [offset:±ms], dan fallback teks polos).
+ * Antarmuka penyedia lirik terisolasi (lokal maupun eksternal).
+ * Setiap penyedia dapat ditambah/diganti tanpa menyentuh UI maupun ViewModel.
+ */
+interface LyricsProvider {
+    val providerId: String
+    val providerLabel: String
+    val priority: Int
+
+    suspend fun fetch(request: LyricsRequest): Result<LyricsDocument>
+}
+
+/**
+ * Parser LRC lengkap (12+ kasus uji):
+ * - [mm:ss.xx], [mm:ss.xxx], [mm:ss:xx], [mm:ss.x], [mm:ss]
+ * - Multi-timestamp per baris ([00:01.00][00:10.50]Teks)
+ * - Global [offset:±ms] (terjepit >= 0ms)
+ * - Enhanced LRC word-level (<mm:ss.xx>kata)
+ * - Tag metadata ([ar:], [ti:], [al:], [by:], [length:], [re:], [ve:]) diabaikan aman
+ * - Baris kosong / instrumental spacer menutup endTimestampMs baris sebelumnya tanpa baris kosong
+ * - Deduplikasi baris identik (timestampMs + text)
+ * - Validasi detik < 60 & pengabaian timestamp rusak tanpa crash
+ * - Fallback lirik teks polos (isSynced = false, timestampMs = 0L)
  */
 object LrcParser {
-    private val timestampRegex = Regex("""\[(\d{1,2}):(\d{2})(?:[.:](\d{1,3}))?]""")
+    private val lineTimestampRegex = Regex("""\[(\d{1,3}):(\d{2})(?:[.:](\d{1,3}))?]""")
+    private val wordTimestampRegex = Regex("""<(\d{1,3}):(\d{2})(?:[.:](\d{1,3}))?>""")
     private val offsetRegex = Regex("""\[offset:\s*([+-]?\d+)\s*]""", RegexOption.IGNORE_CASE)
+    private val metadataTagRegex = Regex("""^\s*\[[a-zA-Z]{2,12}\s*:.*]\s*$""")
 
-    fun parse(rawText: String): List<LyricsLine> {
-        if (rawText.isBlank()) return emptyList()
-        val offsetMs = offsetRegex.find(rawText)?.groupValues?.getOrNull(1)?.toLongOrNull() ?: 0L
-        val timed = mutableListOf<Pair<Long, String>>()
+    fun parse(rawText: String): List<LyricsLine> = parseDetailed(rawText).lines
 
-        rawText.lineSequence().forEach { rawLine ->
-            val matches = timestampRegex.findAll(rawLine).toList()
+    fun parseDetailed(rawText: String): ParsedLyrics {
+        if (rawText.isBlank()) return ParsedLyrics(emptyList(), isSynced = false)
+
+        val normalized = rawText.replace("\r\n", "\n").replace("\r", "\n")
+        val offsetMs = offsetRegex.find(normalized)?.groupValues?.getOrNull(1)?.toLongOrNull() ?: 0L
+
+        data class RawEntry(
+            val timestampMs: Long,
+            val text: String,
+            val words: List<LyricsWord>,
+        )
+
+        val entries = mutableListOf<RawEntry>()
+        val spacerTimestamps = mutableListOf<Long>()
+
+        normalized.lineSequence().forEach { rawLine ->
+            val trimmedLine = rawLine.trim()
+            if (trimmedLine.isEmpty()) return@forEach
+
+            val matches = lineTimestampRegex.findAll(trimmedLine).toList()
             if (matches.isEmpty()) return@forEach
-            val text = timestampRegex.replace(rawLine, "").trim()
-            if (text.isEmpty()) return@forEach
 
-            for (m in matches) {
-                val min = m.groupValues[1].toLongOrNull() ?: 0L
-                val sec = m.groupValues[2].toLongOrNull() ?: 0L
-                val fracRaw = m.groupValues[3]
-                val fracMs = when (fracRaw.length) {
-                    0 -> 0L
-                    1 -> (fracRaw.toLongOrNull() ?: 0L) * 100L
-                    2 -> (fracRaw.toLongOrNull() ?: 0L) * 10L
-                    else -> fracRaw.take(3).toLongOrNull() ?: 0L
+            val validTimestamps = matches.mapNotNull { m ->
+                parseTimestampMatch(m, offsetMs)
+            }
+            if (validTimestamps.isEmpty()) return@forEach
+
+            val bodyRaw = lineTimestampRegex.replace(trimmedLine, "").trim()
+            if (bodyRaw.isEmpty()) {
+                spacerTimestamps.addAll(validTimestamps)
+                return@forEach
+            }
+
+            val (cleanText, words) = parseEnhancedWords(bodyRaw, offsetMs)
+            if (cleanText.isEmpty()) {
+                spacerTimestamps.addAll(validTimestamps)
+                return@forEach
+            }
+
+            for (ts in validTimestamps) {
+                entries.add(RawEntry(timestampMs = ts, text = cleanText, words = words))
+            }
+        }
+
+        if (entries.isNotEmpty()) {
+            // Urutkan kronologis dan buang duplikasi persis (timestampMs + text)
+            val deduped = entries
+                .sortedBy { it.timestampMs }
+                .distinctBy { it.timestampMs to it.text }
+            val sortedSpacers = spacerTimestamps.sorted()
+
+            val result = deduped.mapIndexed { idx, entry ->
+                val nextLineTs = deduped.getOrNull(idx + 1)?.timestampMs
+                val spacerBetween = sortedSpacers.firstOrNull { sp ->
+                    sp > entry.timestampMs && (nextLineTs == null || sp < nextLineTs)
                 }
-                val ts = (min * 60_000L + sec * 1_000L + fracMs + offsetMs).coerceAtLeast(0L)
-                timed.add(ts to text)
-            }
-        }
-
-        if (timed.size >= 2) {
-            val sorted = timed.sortedBy { it.first }
-            return sorted.mapIndexed { idx, (ts, text) ->
-                val endTs = sorted.getOrNull(idx + 1)?.first
-                LyricsLine(timestampMs = ts, endTimestampMs = endTs, text = text)
-            }
-        }
-
-        // Fallback teks polos tanpa timestamp
-        return rawText.lineSequence()
-            .map { it.trim() }
-            .filter { it.isNotEmpty() && !it.startsWith("[") }
-            .mapIndexed { idx, text ->
+                val endTs = spacerBetween ?: nextLineTs
                 LyricsLine(
-                    timestampMs = idx * 4_000L,
-                    endTimestampMs = (idx + 1) * 4_000L,
+                    timestampMs = entry.timestampMs,
+                    endTimestampMs = endTs,
+                    text = entry.text,
+                    wordTimings = entry.words,
+                )
+            }
+            return ParsedLyrics(lines = result, isSynced = true)
+        }
+
+        // Fallback lirik polos (tanpa timestamp valid)
+        val plainLines = normalized.lineSequence()
+            .map { it.trim() }
+            .filter { line ->
+                line.isNotEmpty() &&
+                    !metadataTagRegex.matches(line) &&
+                    !line.startsWith("[")
+            }
+            .map { text ->
+                LyricsLine(
+                    timestampMs = 0L,
+                    endTimestampMs = null,
                     text = text,
                 )
             }
             .toList()
+
+        return ParsedLyrics(lines = plainLines, isSynced = false)
+    }
+
+    private fun parseTimestampMatch(match: MatchResult, offsetMs: Long): Long? {
+        val min = match.groupValues[1].toLongOrNull() ?: return null
+        val sec = match.groupValues[2].toLongOrNull() ?: return null
+        if (sec >= 60L) return null
+        val fracRaw = match.groupValues[3]
+        val fracMs = when (fracRaw.length) {
+            0 -> 0L
+            1 -> (fracRaw.toLongOrNull() ?: 0L) * 100L
+            2 -> (fracRaw.toLongOrNull() ?: 0L) * 10L
+            else -> fracRaw.take(3).toLongOrNull() ?: 0L
+        }
+        return (min * 60_000L + sec * 1_000L + fracMs + offsetMs).coerceAtLeast(0L)
+    }
+
+    private fun parseEnhancedWords(bodyRaw: String, offsetMs: Long): Pair<String, List<LyricsWord>> {
+        val wordMatches = wordTimestampRegex.findAll(bodyRaw).toList()
+        if (wordMatches.isEmpty()) {
+            return bodyRaw.replace(Regex("""\s+"""), " ").trim() to emptyList()
+        }
+
+        val rawWords = mutableListOf<Pair<Long, String>>()
+        for (i in wordMatches.indices) {
+            val match = wordMatches[i]
+            val startMs = parseTimestampMatch(match, offsetMs) ?: continue
+            val textStart = match.range.last + 1
+            val textEnd = wordMatches.getOrNull(i + 1)?.range?.first ?: bodyRaw.length
+            val seg = bodyRaw.substring(textStart, textEnd).trim()
+            if (seg.isNotEmpty()) {
+                rawWords.add(startMs to seg)
+            }
+        }
+        val cleanText = wordTimestampRegex.replace(bodyRaw, " ")
+            .replace(Regex("""\s+"""), " ")
+            .trim()
+
+        val words = rawWords.mapIndexed { idx, (start, text) ->
+            val end = rawWords.getOrNull(idx + 1)?.first ?: (start + 450L)
+            LyricsWord(startMs = start, endMs = end.coerceAtLeast(start + 80L), text = text)
+        }
+        return cleanText to words
     }
 }
 
 /**
- * Penyedia lirik online LRCLib (open-source, tanpa auth/cookie — Default D4).
+ * Penyedia lirik online LRCLIB (open-source MIT, API publik resmi tanpa login/scraping).
+ * - Judul & artis dibersihkan sebelum pencarian.
+ * - Pencocokan durasi dalam toleransi +-2 detik.
+ * - Timeout ketat 6 detik per panggilan pada Dispatchers.IO.
  */
 class LrcLibLyricsProvider(
-    private val httpClient: OkHttpClient,
-) : StreamingLyricsProvider {
+    httpClient: OkHttpClient,
+) : LyricsProvider, StreamingLyricsProvider {
 
-    override val providerId: String = "lrclib"
+    override val providerId: String = PROVIDER_ID
+    override val providerLabel: String = "LRCLIB"
+    override val priority: Int = 20
+
+    private val boundedClient: OkHttpClient = httpClient.newBuilder()
+        .callTimeout(TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        .connectTimeout(4, TimeUnit.SECONDS)
+        .readTimeout(5, TimeUnit.SECONDS)
+        .build()
+
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
+
+    override suspend fun fetch(request: LyricsRequest): Result<LyricsDocument> = withContext(Dispatchers.IO) {
+        val cleanTitle = TrackDisplayRules.cleanTitleForLyrics(request.title)
+        val cleanArtist = cleanArtistForLyrics(request.artistName)
+        if (cleanTitle.isBlank()) {
+            return@withContext Result.failure(StreamingError.Unavailable("Judul lagu kosong"))
+        }
+
+        // 1. Coba endpoint exact match /api/get bila durasi diketahui
+        if (request.durationMs > 0L && cleanArtist.isNotBlank()) {
+            val exact = fetchExact(cleanTitle, cleanArtist, request.albumTitle, request.durationMs)
+            if (exact != null) return@withContext Result.success(exact)
+        }
+
+        // 2. Fallback /api/search dengan filter toleransi durasi +-2 detik
+        val searchUrl = "https://lrclib.net/api/search".toHttpUrl().newBuilder()
+            .addQueryParameter("track_name", cleanTitle)
+            .apply {
+                if (cleanArtist.isNotBlank()) addQueryParameter("artist_name", cleanArtist)
+            }
+            .build()
+
+        val body = executeGet(searchUrl.toString())
+            .getOrElse { return@withContext Result.failure(it) }
+
+        val items = runCatching { json.parseToJsonElement(body).jsonArray }.getOrNull()
+            ?: return@withContext Result.failure(StreamingError.ParseError("Respons LRCLIB tidak valid"))
+
+        val candidates = items.mapNotNull { runCatching { it.jsonObject }.getOrNull() }
+        val chosen = selectBestCandidate(candidates, request.durationMs)
+            ?: return@withContext Result.failure(StreamingError.Unavailable("Lirik tidak ditemukan di LRCLIB"))
+
+        Result.success(chosen)
+    }
 
     override suspend fun fetchLyrics(
         title: String,
         artistName: String,
         durationMs: Long,
-    ): Result<List<LyricsLine>> = withContext(Dispatchers.IO) {
-        val url = "https://lrclib.net/api/search".toHttpUrl().newBuilder()
-            .addQueryParameter("track_name", title)
-            .addQueryParameter("artist_name", artistName)
+    ): Result<List<LyricsLine>> = fetch(
+        LyricsRequest(
+            trackId = "$title|$artistName",
+            title = title,
+            artistName = artistName,
+            durationMs = durationMs,
+        ),
+    ).map { it.lines }
+
+    private fun fetchExact(
+        cleanTitle: String,
+        cleanArtist: String,
+        albumTitle: String?,
+        durationMs: Long,
+    ): LyricsDocument? {
+        val durationSec = (durationMs / 1000.0).roundToLong()
+        val url = "https://lrclib.net/api/get".toHttpUrl().newBuilder()
+            .addQueryParameter("track_name", cleanTitle)
+            .addQueryParameter("artist_name", cleanArtist)
+            .addQueryParameter("duration", durationSec.toString())
+            .apply {
+                if (!albumTitle.isNullOrBlank()) addQueryParameter("album_name", albumTitle)
+            }
             .build()
 
+        val body = executeGet(url.toString()).getOrNull() ?: return null
+        val obj = runCatching { json.parseToJsonElement(body).jsonObject }.getOrNull() ?: return null
+        return candidateToDocument(obj)
+    }
+
+    private fun executeGet(url: String): Result<String> {
         val req = Request.Builder()
             .url(url)
-            .header("User-Agent", "MupaAndroid/0.4 (GPL-3.0)")
+            .header("User-Agent", "MupaAndroid/1.0.0 (GPL-3.0; https://github.com/altgantengleo/Mupa)")
             .get()
             .build()
-
-        val body = try {
-            httpClient.newCall(req).execute().use { resp ->
-                if (resp.code !in 200..299) {
-                    return@withContext Result.failure(StreamingError.Network("LRCLib HTTP ${resp.code}"))
+        return try {
+            boundedClient.newCall(req).execute().use { resp ->
+                if (resp.code == 404) {
+                    return Result.failure(StreamingError.Unavailable("LRCLIB 404"))
                 }
-                resp.body?.string().orEmpty()
+                if (resp.code !in 200..299) {
+                    return Result.failure(StreamingError.Network("LRCLIB HTTP ${resp.code}"))
+                }
+                Result.success(resp.body?.string().orEmpty())
             }
         } catch (io: IOException) {
-            return@withContext Result.failure(StreamingError.Network("LRCLib gagal: ${io.message}", io))
+            Result.failure(StreamingError.Network("LRCLIB gagal: ${io.message}", io))
+        }
+    }
+
+    companion object {
+        const val PROVIDER_ID = "lrclib"
+        const val TIMEOUT_SECONDS = 6L
+        const val DURATION_TOLERANCE_MS = 2_000L
+
+        internal fun cleanArtistForLyrics(rawArtist: String): String {
+            val trimmed = rawArtist.trim()
+            if (trimmed.equals("Lokal", ignoreCase = true) ||
+                trimmed.equals("Streaming", ignoreCase = true) ||
+                trimmed.equals("Unknown", ignoreCase = true) ||
+                trimmed.equals("<unknown>", ignoreCase = true) ||
+                trimmed.equals("Artis tidak diketahui", ignoreCase = true)
+            ) {
+                return ""
+            }
+            return trimmed
+                .replace(Regex("""\s*-\s*Topic$""", RegexOption.IGNORE_CASE), "")
+                .replace(Regex("""\s+(?:feat\.?|ft\.?|x|&|,)\s+.+$""", RegexOption.IGNORE_CASE), "")
+                .trim()
         }
 
-        val items = runCatching { json.parseToJsonElement(body).jsonArray }.getOrNull()
-            ?: return@withContext Result.failure(StreamingError.ParseError("Respons LRCLib tidak valid"))
+        internal fun selectBestCandidate(
+            candidates: List<JsonObject>,
+            targetDurationMs: Long,
+        ): LyricsDocument? {
+            if (candidates.isEmpty()) return null
 
-        for (el in items) {
-            val obj = runCatching { el.jsonObject }.getOrNull() ?: continue
+            val matchingDuration = if (targetDurationMs > 0L) {
+                candidates.filter { obj ->
+                    val durSec = obj["duration"]?.jsonPrimitive?.doubleOrNull ?: return@filter false
+                    val candMs = (durSec * 1_000.0).roundToLong()
+                    abs(candMs - targetDurationMs) <= DURATION_TOLERANCE_MS
+                }
+            } else {
+                candidates
+            }
+
+            // Prioritas 1: syncedLyrics dalam toleransi +-2 detik
+            for (obj in matchingDuration) {
+                val synced = obj["syncedLyrics"]?.jsonPrimitive?.contentOrNull
+                if (!synced.isNullOrBlank()) {
+                    val parsed = LrcParser.parseDetailed(synced)
+                    if (parsed.lines.isNotEmpty() && parsed.isSynced) {
+                        return LyricsDocument(
+                            lines = parsed.lines,
+                            rawText = synced,
+                            isSynced = true,
+                            providerId = PROVIDER_ID,
+                            providerLabel = "LRCLIB",
+                        )
+                    }
+                }
+            }
+
+            // Prioritas 2: plainLyrics dalam toleransi +-2 detik
+            for (obj in matchingDuration) {
+                val plain = obj["plainLyrics"]?.jsonPrimitive?.contentOrNull
+                if (!plain.isNullOrBlank()) {
+                    val parsed = LrcParser.parseDetailed(plain)
+                    if (parsed.lines.isNotEmpty()) {
+                        return LyricsDocument(
+                            lines = parsed.lines,
+                            rawText = plain,
+                            isSynced = parsed.isSynced,
+                            providerId = PROVIDER_ID,
+                            providerLabel = "LRCLIB",
+                        )
+                    }
+                }
+            }
+
+            return null
+        }
+
+        private fun candidateToDocument(obj: JsonObject): LyricsDocument? {
             val synced = obj["syncedLyrics"]?.jsonPrimitive?.contentOrNull
             if (!synced.isNullOrBlank()) {
-                val parsed = LrcParser.parse(synced)
-                if (parsed.isNotEmpty()) return@withContext Result.success(parsed)
+                val parsed = LrcParser.parseDetailed(synced)
+                if (parsed.lines.isNotEmpty()) {
+                    return LyricsDocument(
+                        lines = parsed.lines,
+                        rawText = synced,
+                        isSynced = parsed.isSynced,
+                        providerId = PROVIDER_ID,
+                        providerLabel = "LRCLIB",
+                    )
+                }
             }
-        }
-        for (el in items) {
-            val obj = runCatching { el.jsonObject }.getOrNull() ?: continue
             val plain = obj["plainLyrics"]?.jsonPrimitive?.contentOrNull
             if (!plain.isNullOrBlank()) {
-                val parsed = LrcParser.parse(plain)
-                if (parsed.isNotEmpty()) return@withContext Result.success(parsed)
+                val parsed = LrcParser.parseDetailed(plain)
+                if (parsed.lines.isNotEmpty()) {
+                    return LyricsDocument(
+                        lines = parsed.lines,
+                        rawText = plain,
+                        isSynced = parsed.isSynced,
+                        providerId = PROVIDER_ID,
+                        providerLabel = "LRCLIB",
+                    )
+                }
             }
+            return null
         }
-        Result.failure(StreamingError.Unavailable("Lirik tidak ditemukan di LRCLib"))
     }
 }
