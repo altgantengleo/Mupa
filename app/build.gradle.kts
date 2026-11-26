@@ -15,8 +15,8 @@ android {
         applicationId = "com.xeno.mupa"
         minSdk = 26
         targetSdk = 35
-        versionCode = 2
-        versionName = "0.2.0-stage2"
+        versionCode = 5
+        versionName = "1.0.0-rc1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -59,8 +59,20 @@ android {
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
+            excludes += "META-INF/INDEX.LIST"
+            excludes += "META-INF/DEPENDENCIES"
         }
     }
+}
+
+composeCompiler {
+    stabilityConfigurationFiles.add(
+        rootProject.layout.projectDirectory.file("compose_compiler_config.conf"),
+    )
+    val isReleaseTask = gradle.startParameter.taskNames.any {
+        it.contains("Release", ignoreCase = true)
+    }
+    includeSourceInformation.set(!isReleaseTask)
 }
 
 dependencies {
@@ -76,6 +88,7 @@ dependencies {
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.core.splashscreen)
+    implementation(libs.androidx.profileinstaller)
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.lifecycle.runtime.compose)
