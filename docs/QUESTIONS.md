@@ -1,79 +1,33 @@
-# Pertanyaan Keputusan Gerbang Tahap 0 (`QUESTIONS.md`)
+# Keputusan & Default Proyek Mupa (`QUESTIONS.md`)
 
-> Silakan tinjau dan jawab poin-poin di bawah ini sebelum kita masuk ke **Tahap 1 (UI/UX)**. Setiap pertanyaan sudah disertai rekomendasi agar keputusan bisa cepat.
-
----
-
-## Kelompok 1: Identitas Brand, Palet & Aset
-
-### Q1. Nama pengganti fitur `"Mix X"`
-Karena app direbrand total dari *Music X* menjadi **Mupa**, nama fitur rekomendasi lokal `"Mix X"` masih membawa huruf `"X"` dari nama lama.
-- **Opsi:**
-  1. **`Mix Mupa`** *(Rekomendasi — singkat, selaras brand baru, langsung dipahami)*
-  2. **`Racikan Mupa`** *(lebih lokal/editorial, selaras tombol "Racik ulang")*
-  3. **`Mix Harian`** / **`Mix Untukmu`** *(netral)*
-  4. Nama lain pilihanmu?
-
-### Q2. Pilihan Palet Aksen Baru Berbasis Logo Mupa (`#FF5A3C`, `#16161A`, `#F6F4EF`)
-Lihat perbandingan detail & kontras WCAG di `docs/BRAND-MAP.md` (§2.3). Mana yang kamu pilih sebagai identitas dasar Mupa?
-- **Opsi:**
-  1. **Opsi A — Ember Editorial** *(Rekomendasi: Koral `#FF5A3C`/`#FF7357` + Amber hangat `#FFB067` + Krem `#F6F4EF` di atas `#0E0E11`/`#16161A`)*
-  2. **Opsi B — Minimal Studio** *(UI dominan monokrom krem `#F6F4EF` & arang `#16161A`; koral `#FF5A3C` hanya muncul di aksi utama seperti Play, Lanjut, Like, indikator aktif)*
-  3. **Opsi C — Contrast Dusk** *(Koral `#FF6B4E` dipasangkan dengan Biru Kabut `#7AA2F7` untuk kontras hangat-dingin)*
-- **Sub-pertanyaan Q2b:** Apakah warna dinamis dari cover lagu yang sedang diputar tetap aktif untuk **Aurora & Now Playing** (dengan palet pilihanmu di atas sebagai warna utama saat belum ada lagu / pada chrome utama)? *(Rekomendasi: **Ya**, agar cover art tetap hidup dan wipe lirik tetap adaptif).*
-
-### Q3. Wordmark & Lockup (`assets/logo/`)
-File `mupa-wordmark_from-sheet_transparent.png` dan `mupa-lockup_from-sheet.png` adalah crop resolusi rendah dari lembar asli (tidak punya versi on-dark transparan yang tajam).
-- **Opsi:**
-  1. **Tahap 1 pakai glyph vektor SVG `"m"` + teks tipografi Compose bersih (`mupa`)** *(Rekomendasi — tajam di semua DPI & tema gelap; bisa diganti kapan saja jika nanti ada SVG wordmark bersih)*
-  2. Kamu akan menyediakan file SVG wordmark/lockup bersih terlebih dulu sebelum Tahap 1?
+> Seluruh pertanyaan gerbang Tahap 0 sudah diputuskan. Keputusan non-blokir yang diambil sebagai default dicatat di bagian akhir agar mudah ditinjau atau diubah kapan saja.
 
 ---
 
-## Kelompok 2: Konfigurasi Proyek Android & Alur Git/CI
+## Keputusan Final dari User
 
-### Q4. Konfirmasi `applicationId`
-- Apakah kita kunci `applicationId = "com.xeno.mupa"` (dan `namespace = "com.xeno.mupa"`)? *(Rekomendasi: **Ya**, dengan suffix `.debug` untuk build debug agar bisa dipasang berdampingan).*
-
-### Q5. Pilihan `minSdk`
-- **Opsi 1: `minSdk = 26` (Android 8.0 Oreo)** *(Rekomendasi)*
-  - **Plus:** Adaptive icon (`mipmap-anydpi-v26`) berjalan native tanpa perlu fallback bitmap PNG legacy; dukungan `NotificationChannel`, font variabel, dan API audio lebih bersih; mencakup mayoritas besar perangkat Android aktif; perawatan kode lebih sederhana.
-  - **Minus:** Tidak bisa dipasang di Android 7.0–7.1 (API 24–25).
-- **Opsi 2: `minSdk = 24` (Android 7.0 Nougat)** *(seperti Mochy)*
-  - **Plus:** Mendukung perangkat Android 7 lama.
-  - **Minus:** Wajib membuat fallback bitmap ikon legacy (`mipmap-mdpi..xxxhdpi`) tanpa mengubah desain, serta percabangan ekstra untuk API < 26.
-- Mana yang kamu pilih: **`minSdk = 26`** atau **`minSdk = 24`**?
-
-### Q6. Struktur Folder Proyek & Inisialisasi Git untuk GitHub Actions
-Saat audit ditemukan bahwa `d:\Music-X-Native` **belum merupakan repositori Git** (tidak ada `.git`).
-- **Pertanyaan:**
-  1. Di mana root proyek Gradle Mupa sebaiknya diletakkan?
-     - **Opsi A (Rekomendasi):** Langsung di root `d:\Music-X-Native/` (`settings.gradle.kts`, `app/`, `.github/workflows/`, `docs/`), dengan `Mochy/` dan `music-x-V8_5.html` dimasukkan ke `.gitignore` agar referensi lama tidak ikut ter-push ke GitHub maupun terbawa ke build.
-     - **Opsi B:** Di subfolder terpisah, mis. `d:\Music-X-Native/mupa/`.
-  2. Apakah mulai Tahap 1 kita inisialisasi `git init` lokal dengan pola **1 branch/commit per tahap** (sesuai Aturan #5) sehingga tinggal kamu push ke GitHub untuk memicu GitHub Actions?
+| ID | Topik | Keputusan Final |
+|---|---|---|
+| **Q1** | Nama pengganti `"Mix X"` | **`Mix Mupa`** |
+| **Q2** | Palet Aksen & Dinamis | **Opsi A — Ember Editorial** (`#FF5A3C`/`#FF7357` + `#FFB067` + `#F6F4EF` di atas `#0E0E11`/`#16161A`). Warna dinamis cover art aktif untuk **Aurora & Now Playing**, otomatis nonaktif pada **Mode OLED / Mode Performa**. Teks di atas koral wajib gelap `#16161A`. |
+| **Q3** | Wordmark / Lockup | Glyph SVG resmi + teks tipografi Compose bersih (`mupa`). Wordmark SVG bersih menyusul tanpa memblokir pengembangan. |
+| **Q4** | `applicationId` | `com.xeno.mupa` (dengan suffix `.debug` untuk debug). |
+| **Q5** | `minSdk` | **`26` (Android 8.0 Oreo)**. |
+| **Q6** | Struktur Proyek & Git | Proyek Gradle di root `d:\Music-X-Native/`; `Mochy/` dan `music-x-V8_5.html` di `.gitignore`; `git init` lokal; remote GitHub disiapkan user; tanpa token/rahasia di file, log, atau commit. |
+| **Q7** | Model Lisensi | **Open-Source GPL-3.0** (`LICENSE` GPL-3.0 + `NOTICE` atribusi dependensi). Tahap 2 boleh memakai `NewPipeExtractor` terisolasi di balik interface `StreamProvider`. Kode Mupa tetap ditulis sendiri (tidak disalin dari Mochy). |
+| **Q8** | Batas Artis Onboarding | Min **2**, anjuran **4**, maksimal **8**, tanpa tombol lewati. |
+| **Q9** | Pengaturan & Akun | Pengaturan diringkas (`Crystal`/`Liquid+`, Mode OLED, Aurora, Mode Performa, Hapus Nama Artis, Ubah Artis Favorit) & Tab Akun ringkas. |
 
 ---
 
-## Kelompok 3: Lisensi & Strategi Ketergantungan (Berpengaruh Mulai Tahap 2)
+## Keputusan Default Non-Blokir yang Diterapkan Otomatis
 
-### Q7. Model Lisensi Mupa (Terkait GPL-3.0 pada Ekosistem Streaming)
-Hasil audit mengonfirmasi bahwa Mochy, `NewPipeExtractor`, `innertubex`, dan `media3-ffmpeg-decoder` semuanya berlisensi **GPL-3.0 (strong copyleft)**. Di Tahap 1 kita 100% clean-room dengan dependensi Apache-2.0/MIT saja. Namun untuk **Tahap 2 (Streaming)**:
-- **Opsi 1: Mupa dirilis Open-Source GPL-3.0** *(Jika ingin fleksibilitas boleh memakai library seperti `NewPipeExtractor` atau FFmpeg decoder bila suatu saat dibutuhkan sebagai fallback).*
-- **Opsi 2: Mupa Bebas GPL (Lisensi Permisif / MIT / Apache-2.0 / Privat)** *(Rekomendasi jika kamu ingin kendali penuh atas lisensi app: Tahap 2 kita tulis 100% klien InnerTube + cipher/n-param solver sendiri secara clean-room, dan tanpa menautkan `NewPipeExtractor`, `innertubex`, maupun Jellyfin FFmpeg).*
-- Mana arah lisensi yang kamu inginkan untuk Mupa?
-
----
-
-## Kelompok 4: Lingkup Minimal Tahap 1 (Onboarding & Pengaturan)
-
-### Q8. Batas Maksimal Pilihan Artis di Onboarding
-Syarat wajib: minimal **2 artis**, anjuran **4 artis**, tidak ada tombol lewati.
-- Apakah batas maksimal **8 artis** cocok? *(Rekomendasi: **8** — cukup kaya sebagai seed rekomendasi tanpa membebani layar/query).*
-
-### Q9. Penyederhanaan Pengaturan dari HTML V8.5 (Aturan #7)
-HTML V8.5 memiliki banyak pengaturan berlapis (4 gaya kaca, 7 tier grafik, 5 tier FPS, 3 gaya lirik, streak/level, AI bahasa, menu beta). Untuk menjaga Mupa tetap rapi dan minimal di Tahap 1:
-- **Usulan set pengaturan Tahap 1:**
-  - Tampilan: **Gaya Kaca** (`Crystal` / `Liquid+`), **Mode OLED** (1 toggle), **Aurora Latar** (1 toggle), **Mode Performa / Kurangi Blur** (1 toggle).
-  - Pustaka: **Hapus Nama Artis dari Judul** (1 toggle, default ON).
-  - Akun: **Ubah Artis Favorit** (membuka ulang pemilih artis tanpa hapus data) + **Tentang Mupa**.
-- **Sub-pertanyaan Q9b:** Untuk Tab **Akun**, apakah kamu ingin tampilan ringkas (Profil lokal, Ringkasan statistik dasar seperti jumlah lagu/favorit/waktu dengar, Artis Favorit, dan akses cepat Pengaturan), atau perlu membawa grafik mingguan/streak/level seperti HTML V8.5? *(Rekomendasi: **Ringkas & bersih** di Tahap 1 agar tidak penuh opsi berlebihan).*
+| ID | Topik | Default yang Diterapkan | Alasan & Dampak |
+|---|---|---|---|
+| **D1** | Autentikasi Streaming | **Tanpa login / tanpa cookie (guest mode)** | Meminimalkan kompleksitas & risiko keamanan kredensial; semua katalog, pencarian, dan streaming berjalan tanpa akun. |
+| **D2** | Penyedia Streaming & Urutan Prioritas | **1. InnerTube (utama, + NewPipeExtractor terisolasi)** → **2. JioSaavn (fallback AAC 320/160 kbps)** → **3. Monochrome (fallback opsional FLAC)** | Berdasarkan `AUDIT.md`: InnerTube punya katalog terluas; JioSaavn memakai API langsung yang relatif stabil untuk fallback tanpa login; Monochrome menyediakan lossless bila server aktif. Semua di balik `StreamProvider` + circuit breaker. |
+| **D3** | Ukuran Cache Audio Default | **500 MB** (`500L * 1024 * 1024` byte) | Seimbang untuk pemutaran ulang cepat tanpa membebani penyimpanan HP spek rendah (bisa diatur di Pengaturan). |
+| **D4** | Penyedia Lirik Online (Tahap 4) | **Tag tersemat lokal (Rust) → LRCLib (`https://lrclib.net/api/`)** | LRCLib open-source, tanpa auth, stabil, dan mendukung LRC tersinkron + teks polos. |
+| **D5** | `compileSdk` & `targetSdk` | **`35` (Android 15)** | Stabil di SDK lokal & GitHub Actions `ubuntu-latest`, mendukung penuh API modern (edge-to-edge, foreground service types, `RenderEffect`). |
+| **D6** | Binding Rust (Tahap 3) | **UniFFI (proc-macro / Kotlin JNA)** + fallback Kotlin Scoped Storage safe bila `libmupa_local.so` belum tersedia di host JVM unit test | Menjaga unit test JVM & CI tetap berjalan mulus sekaligus menyediakan engine Rust native penuh untuk `arm64-v8a` (dan `x86_64`). |
+| **D7** | Rilis / Signing Lokal | Release build di Tahap 5 diverifikasi dengan `assembleRelease` (R8 minify + shrinkResources aktif; keystore release sesungguhnya disediakan user di GitHub Secrets bila nanti ingin publikasi). | Tidak pernah menyimpan keystore/password release di repositori. |

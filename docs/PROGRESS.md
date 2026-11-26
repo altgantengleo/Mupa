@@ -5,9 +5,9 @@
 ---
 
 ## Status Saat Ini
-- **Tahap Aktif:** **Tahap 1A (Fondasi Proyek, Tema/Brand, Ikon/Splash, Navigasi & Bottom Nav)** — **SELESAI**
-- **Branch Git:** `stage-1a/foundation` (bercabang dari `main` yang menyimpan commit Tahap 0 `570aae5`)
-- **Gerbang Berikutnya:** Menunggu persetujuan user untuk lanjut ke **Tahap 1B (Layar Penuh, Onboarding Artis, Fake Repositories, Player Mini↔Full, Lirik, Antrean, EQ)** serta pilihan final **Q7** sebelum Tahap 2.
+- **Tahap Aktif:** **Tahap 1B (Mini/Full Player, Transisi 0..1, Lirik, Antrean)** — **SELESAI** · Lanjut ke **Tahap 1C**
+- **Branch Git:** `stage-1a/foundation` (commit bertahap per checkpoint agar mudah di-rollback)
+- **Lisensi:** **GPL-3.0** (`LICENSE` & `NOTICE` telah ditambahkan)
 
 ---
 
@@ -15,9 +15,10 @@
 
 | Tahap | Status | Progres | Ringkasan |
 |---|---|---:|---|
-| **Tahap 0: Audit** | **Selesai & Disetujui** | 100% | Audit Mochy & `music-x-V8_5.html`, verifikasi aset, 5 dokumen `docs/`. |
-| **Tahap 1A: Fondasi UI/UX** | **Selesai (menunggu review)** | 100% *(~35% dari Tahap 1)* | Multi-modul Gradle (`:app`, `:core:model`, `:core:domain`, `:core:designsystem`), CI GitHub Actions, git lokal + `.gitignore`, tema Ember Editorial + OLED + warna dinamis cover, ikon adaptive/monochrome/notifikasi + splash, DataStore preferensi, navigasi 4 tab + floating glass bottom bar. |
-| **Tahap 1B: Layar & Player UI** | **Belum mulai** | 0% *(~65% dari Tahap 1 tersisa)* | Fake repositories, Onboarding Artis Favorit wajib (min 2, anjuran 4, maks 8), layar penuh Beranda/Cari/Pustaka/Akun/Pengaturan, Mini Player ↔ Full Now Playing (tanpa Semi, tanpa overshoot), Lirik wipe adaptif, Antrean, EQ 5-band. |
+| **Tahap 0: Audit** | **Selesai** | 100% | Audit Mochy & `music-x-V8_5.html`, 5 dokumen `docs/`. |
+| **Tahap 1A: Fondasi UI/UX** | **Selesai** (`8565704`) | 100% | Multi-modul Gradle, CI, tema Ember Editorial + OLED, ikon/splash, DataStore, navigasi 4 tab, floating bottom nav. |
+| **Tahap 1B: Player, Lirik, Antrean** | **Selesai** | 100% | `MupaPlayerSheetState` (1 state progres 0..1 di layout/draw, nol overshoot, anti-kedip), Mini Player ↔ Full Now Playing (tanpa Semi), Lirik wipe warna adaptif + offset, Antrean + 2-frame pre-mount, `LICENSE` GPL-3.0 + `NOTICE`, 9/9 unit test lulus. |
+| **Tahap 1C: Layar Penuh & Onboarding** | **Sedang dikerjakan** | 0% | Fake repositories, Onboarding Artis wajib (min 2, anjuran 4, maks 8), Beranda, Cari, Pustaka, Akun, Pengaturan. |
 | **Tahap 2: Streaming** | Belum mulai | 0% | Klien InnerTube + penyedia fallback terisolasi, Media3 service/session/notifikasi/cache/queue. |
 | **Tahap 3: Rust Local Mode** | Belum mulai | 0% | Crate Rust (import, scan folder, metadata/tag, DB lokal, rekomendasi lokal, Hapus Nama Artis) + UniFFI/JNI + unit test. |
 | **Tahap 4: Integrasi** | Belum mulai | 0% | Gabung streaming + lokal, lirik nyata, EQ nyata, backup/restore, uji stabilitas. |

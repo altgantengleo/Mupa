@@ -13,6 +13,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.xeno.mupa.core.designsystem.theme.MupaTheme
 import com.xeno.mupa.ui.MupaApp
 import com.xeno.mupa.ui.MupaAppViewModel
+import com.xeno.mupa.ui.player.MupaPlayerViewModel
 import dagger.hilt.android.AndroidEntryPoint
 
 @AndroidEntryPoint
@@ -27,17 +28,45 @@ class MainActivity : ComponentActivity() {
         )
 
         setContent {
-            val viewModel: MupaAppViewModel = hiltViewModel()
-            val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+            val appViewModel: MupaAppViewModel = hiltViewModel()
+            val playerViewModel: MupaPlayerViewModel = hiltViewModel()
+            val uiState by appViewModel.uiState.collectAsStateWithLifecycle()
+            val playerState by playerViewModel.uiState.collectAsStateWithLifecycle()
 
-            MupaTheme(appearance = uiState.appearance) {
+            val resolvedAppearance = uiState.appearance.copy(
+                dynamicCoverAccent = if (playerState.currentTrack != null &&
+                    uiState.coverAccentPreset == com.xeno.mupa.ui.CoverAccentPreset.EMBER_DEFAULT
+                ) {
+                    playerState.coverAccent
+                } else {
+                    uiState.coverAccentPreset.accent
+                },
+            )
+
+            MupaTheme(appearance = resolvedAppearance) {
                 MupaApp(
                     uiState = uiState,
-                    onGlassStyleChange = viewModel::setGlassStyle,
-                    onOledModeChange = viewModel::setOledMode,
-                    onAuroraEnabledChange = viewModel::setAuroraEnabled,
-                    onPerformanceModeChange = viewModel::setPerformanceMode,
-                    onCoverAccentPresetChange = viewModel::setCoverAccentPreset,
+                    playerState = playerState,
+                    onGlassStyleChange = appViewModel::setGlassStyle,
+                    onOledModeChange = appViewModel::setOledMode,
+                    onAuroraEnabledChange = appViewModel::setAuroraEnabled,
+                    onPerformanceModeChange = appViewModel::setPerformanceMode,
+                    onCoverAccentPresetChange = appViewModel::setCoverAccentPreset,
+                    onTogglePlayPause = playerViewModel::togglePlayPause,
+                    onSeekTo = playerViewModel::seekTo,
+                    onSkipNext = playerViewModel::skipNext,
+                    onSkipPrevious = playerViewModel::skipPrevious,
+                    onToggleShuffle = playerViewModel::toggleShuffle,
+                    onCycleRepeat = playerViewModel::cycleRepeatMode,
+                    onToggleFavorite = playerViewModel::toggleFavoriteCurrent,
+                    onOpenOverlay = playerViewModel::openOverlay,
+                    onCloseOverlay = playerViewModel::closeOverlay,
+                    onAdjustLyricsOffset = playerViewModel::adjustLyricsOffset,
+                    onResetLyricsOffset = playerViewModel::resetLyricsOffset,
+                    onCycleSleepTimer = playerViewModel::cycleSleepTimer,
+                    onSelectQueueIndex = playerViewModel::selectQueueIndex,
+                    onMoveQueueItem = playerViewModel::moveQueueItem,
+                    onRemoveQueueItem = playerViewModel::removeQueueItem,
                 )
             }
         }
