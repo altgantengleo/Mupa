@@ -1,11 +1,13 @@
 package com.xeno.mupa.playback
 
+import android.content.Intent
 import android.net.Uri
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.Player
 import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSpec
@@ -122,6 +124,18 @@ class MupaPlaybackService : MediaLibraryService() {
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? =
         mediaLibrarySession
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        val currentPlayer = mediaLibrarySession?.player
+        if (currentPlayer == null ||
+            !currentPlayer.playWhenReady ||
+            currentPlayer.mediaItemCount == 0 ||
+            currentPlayer.playbackState == Player.STATE_ENDED
+        ) {
+            stopSelf()
+        }
+        super.onTaskRemoved(rootIntent)
+    }
 
     override fun onDestroy() {
         mediaLibrarySession?.release()

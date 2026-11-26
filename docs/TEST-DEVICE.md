@@ -1,89 +1,77 @@
 # Panduan Uji Manual Perangkat Nyata — Mupa (`TEST-DEVICE.md`)
 
-> Dokumen ini mencakup seluruh aspek yang **TIDAK dapat diverifikasi di PC/CI** (pemutaran audio nyata, kelancaran animasi 60/120 Hz, `RenderEffect` GPU, pemuatan JNI Rust `libmupa_local.so`, scoped storage Android, dan perilaku background HyperOS/Xiaomi).
+> Dokumen ini mencakup seluruh aspek yang **TIDAK dapat diverifikasi di PC/CI** (pemutaran audio nyata, kelancaran animasi 60/120 Hz, blur Haze/RenderEffect GPU, SAF file manager nyata, pencabutan izin file lokal, dan perilaku background HyperOS/Xiaomi). Setiap butir di bawah berstatus **"belum terverifikasi di perangkat fisik"** hingga diuji langsung oleh user.
 
 ---
 
-## 1. Status Jujur: Yang Sudah vs Belum Terverifikasi
+## 1. Status Jujur: Sudah Terverifikasi di PC vs Belum Terverifikasi di Perangkat
 
-### Sudah Terverifikasi di Lokal / CI
-- Kompilasi seluruh 9 modul Gradle (`assembleDebug` & `assembleRelease` dengan R8 minify + shrinkResources).
-- Android Lint (0 error pada seluruh modul Android).
-- 30+ unit test JVM (kontras WCAG, tema OLED/Performa, navigasi 4 tab, Onboarding min 2 / maks 8 / `SavedStateHandle`, non-destruktif "Hapus Nama Artis", parser fixture InnerTube & JioSaavn tanpa jaringan, circuit breaker & fallback aggregator, JSON queue persistence, Mix Mupa MMR & exploration slots, DSP EQ 5-band RBJ biquad, parser LRC, dan Backup/Restore JSON tanpa rahasia).
-- Paritas SHA-256 byte-for-byte seluruh 6 file ikon `assets/android-res/` → `app/src/main/res/`.
-- Audit grep: 0 sisa kata `"mochy"` dan 0 sisa kata `"music x"` di seluruh kode, resource, package, dan CI.
+### Sudah Terverifikasi di PC Lokal (Branch `fase-2r`)
+- Kompilasi seluruh modul Gradle (`assembleDebug` & `assembleRelease` dengan R8 minify + shrinkResources).
+- Android Lint (`lintDebug`: 0 error).
+- Seluruh unit test & Compose UI test Robolectric (`MupaUserFlowsUiTest`, `R1FoundationAndLocalRulesTest`, `R3PlayerAndCinemaUiTest`, `R4LyricsParserAndRepositoryTest`, `BaselineScreenshotsTest`, `R5ScreenshotMatrixTest`, dan seluruh suite Tahap 1–5).
+- Inspeksi visual langsung screenshot JVM (`docs/screens/`): baseline R0 (4 layar) vs hasil R2/R3/R5 meliputi `360dp`, `411dp`, `fontScale 1.0` & `1.3`, OLED OFF & ON, semua status Cari (awal/hasil/memuat/error), Pustaka (Streaming, Lokal kosong, Lokal terisi), Beranda panjang + Mini+Nav (bukti B1), Now Playing + Lirik, Cinema, Antrean, dan Akun.
+- Audit brand (`mochy`, `music x`, `musicx` di luar `docs/`): **0 temuan**.
+- Audit overshoot (`dampingRatio < 1f`): **0 temuan**.
+- Paritas SHA-256 ikon (`assets/android-res/` → `app/src/main/res/`): **6 / 6 identik**.
 
-### BELUM Terverifikasi di PC Lokal (Wajib Uji di GitHub Actions / HP Nyata)
-1. **Kompilasi & unit test Rust (`cargo test` & `cargo-ndk` untuk `arm64-v8a` / `x86_64`):** `cargo` tidak terpasang di PC lokal ini; workflow `.github/workflows/android-ci.yml` telah disiapkan untuk menjalankan `cargo test` dan membangun `libmupa_local.so` di GitHub Actions.
-2. **Eksekusi workflow CI di server GitHub:** Remote GitHub disiapkan oleh user sendiri.
-3. **Pemutaran audio nyata (streaming InnerTube/JioSaavn & file lokal `content://`)** serta latensi buffer dan kualitas suara EQ 5-band.
-4. **Kelancaran animasi 60/120 Hz & uji nol-kedip visual** saat buka-tutup Mini ↔ Full Player, Lirik wipe adaptif, dan `RenderEffect` pada GPU perangkat fisik.
-5. **Tampilan ikon adaptive (bulat, squircle, kotak, themed monochrome)** dan lingkaran splash screen pada launcher nyata.
-6. **Pemindaian Scoped Storage MediaStore/SAF nyata** dan pemuatan JNI `libmupa_local.so` di perangkat ARM64.
-7. **Ketahanan playback background pada HyperOS / MIUI** (ketika layar mati > 15 menit).
-
----
-
-## 2. Pengaturan Wajib di HP Xiaomi / HyperOS (Agar Playback Background Tidak Dimatikan)
-
-HyperOS/MIUI agresif menghentikan foreground service media jika penghemat baterai dibiarkan default. Lakukan langkah ini setelah memasang APK debug/release:
-
-1. **Penghemat Baterai (Wajib):**
-   - Buka **Setelan → Aplikasi → Kelola aplikasi → Mupa → Penghemat baterai**.
-   - Pilih **Tidak ada pembatasan** *(No restrictions)*.
-2. **Mulai Otomatis di Latar Belakang:**
-   - Di halaman info aplikasi **Mupa**, aktifkan **Mulai otomatis di latar belakang** *(Background autostart)*.
-3. **Kunci Aplikasi di Recents (Disarankan saat uji panjang):**
-   - Buka tombol *Recent Apps*, tekan tahan kartu **Mupa**, ketuk ikon **Gembok (Lock)** agar HyperOS tidak membersihkan proses saat RAM rendah.
-4. **Izin Notifikasi & Audio (Android 13–15):**
-   - Izinkan **Notifikasi** agar kontrol pemutar (`ic_notification`) tampil di shade & lockscreen.
-   - Izinkan **Musik dan audio** (`READ_MEDIA_AUDIO`) untuk memindai file lokal via Scoped Storage.
+### BELUM Terverifikasi di PC Lokal (Wajib Uji di HP Nyata)
+1. **Impor SAF file & folder nyata** (`OpenMultipleDocuments` & `OpenDocumentTree`), `takePersistableUriPermission`, pembacaan tag embedded & artwork lokal pada berbagai codec (MP3/FLAC/M4A/OPUS), serta **pencabutan izin / penghapusan file di File Manager**.
+2. **Pemutaran audio nyata** (streaming InnerTube/JioSaavn, segmen buffer, cache 500 MB, perpindahan Wi-Fi ↔ seluler, dan audio file lokal `content://`) serta EQ 5-band nyata di earphone.
+3. **Buka-tutup cepat Player, half-drag release, rotasi layar saat player terbuka, dan kelancaran 60/120 Hz** (nol jank, nol kedip/flash hitam).
+4. **Transisi lirik cepat & sinkronisasi real-time** saat lagu berputar, tap-to-seek, scroll manual + jeda 3 dtk, offset ±0,5 dtk, dan wipe OKLCH pada sampul gelap/terang nyata.
+5. **Efek blur Haze (`Crystal` & `Liquid+`) di API 31+ GPU nyata** vs `Solid` default, Mode OLED `#000000`, dan Mode Performa.
+6. **Ikon adaptive & Themed Icon** pada launcher nyata + splash screen cold start.
+7. **Ketahanan playback background di HyperOS / MIUI** (layar mati > 15 menit, `onTaskRemoved`, notifikasi lockscreen, cabut Bluetooth).
+8. **Eksekusi `cargo test` & `cargo-ndk` Rust (`arm64-v8a`, `x86_64`)** di GitHub Actions (`cargo` tidak terpasang di PC lokal).
 
 ---
 
-## 3. Skenario Uji Manual di Perangkat Nyata
+## 2. Pengaturan Wajib di HP Xiaomi / HyperOS
 
-### A. Ikon Launcher, Splash & Branding
-1. Pasang APK di HP Xiaomi/HyperOS.
-2. Periksa ikon Mupa di Home Screen & App Drawer pada bentuk mask launcher (squircle/bulat/kotak): pastikan glyph `"m"` (badan krem `#F6F4EF`, kaki oranye `#FF5A3C` di atas `#16161A`) tidak terpotong tepi.
-3. Aktifkan *Themed Icons* (Android 13+) di pengaturan wallpaper: verifikasi badan glyph solid dan kaki kanan lebih transparan (~55%).
-4. Buka aplikasi dari cold start: verifikasi splash screen berlatar `#16161A` dengan glyph terpusat dan tidak terpotong lingkaran splash.
+1. **Penghemat Baterai:** Setelan → Aplikasi → Kelola aplikasi → **Mupa** → Penghemat baterai → **Tidak ada pembatasan**.
+2. **Mulai Otomatis di Latar Belakang:** Aktifkan pada halaman info aplikasi Mupa.
+3. **Kunci di Recents** saat uji pemutaran latar belakang panjang.
+4. **Izin Notifikasi (Android 13–15):** Izinkan agar kontrol pemutar Media3 tampil di shade & lockscreen.
 
-### B. Onboarding Artis Favorit (Wajib)
-1. Buka Mupa pertama kali (fresh install): verifikasi layar **Pilih Artis Favoritmu** muncul sebelum Beranda dan **tidak ada tombol Lewati**.
-2. Tekan tombol **Back** sistem: pastikan aplikasi keluar (tidak melewati onboarding ke Beranda).
-3. Pilih 1 artis: verifikasi tombol **Lanjut** tetap nonaktif dan counter menunjukkan `1 / 8`.
-4. Pilih artis ke-2: verifikasi tombol **Lanjut** aktif (warna koral `#FF5A3C`, teks gelap `#16161A` terbaca tajam).
-5. Uji cari nama artis, putar layar (rotasi landscape ↔ portrait): pastikan pilihan sementara **tidak hilang**.
-6. Pilih hingga 8 artis lalu coba ketuk artis ke-9: pastikan terkunci di `8 / 8`.
-7. Tekan **Lanjut** → masuk ke Beranda. Verifikasi rak **Untukmu** menampilkan artis yang baru dipilih.
-8. Tutup paksa dan buka ulang aplikasi: pastikan Onboarding **tidak muncul lagi**.
-9. Buka **Akun → Ubah Artis Favorit**: ubah pilihan, tekan Simpan, pastikan Beranda terbarui tanpa menghapus data.
+---
 
-### C. Animasi Player (Mini ↔ Full), Lirik & Antrean (60 / 120 Hz)
-1. Putar lagu dari Beranda: verifikasi Mini Player muncul mulus di atas Floating Glass Bottom Nav.
-2. Ketuk Mini Player dan uji **drag-up / drag-down 1:1** berulang 10×:
-   - Pastikan **nol pantulan / overshoot** (berhenti halus).
-   - Pastikan **nol kedip / flash hitam** di awal, tengah, maupun akhir transisi.
-   - Pastikan Bottom Nav ikut turun dan memudar secara sinkron.
-3. Di Full Now Playing, buka **Lirik**: verifikasi sapuan warna adaptif terang terbaca di atas latar gelap, ketuk baris lirik untuk seek, dan uji kontrol **Offset ±0,5 dtk**.
-4. Buka **Antrean**: geser naik/turun urutan lagu, hapus lagu, ketuk lagu lain.
-5. Tekan tombol **Back** saat Lirik/Antrean terbuka: pastikan menutup overlay dulu; tekan **Back** lagi → menciutkan Full → Mini Player.
+## 3. Skenario Uji Manual Fase 2R di Perangkat Nyata
 
-### D. Streaming, MediaSession, Notifikasi & Cache
-1. Buka **Cari**, ketik judul lagu/artis online (dengan internet aktif): pastikan hasil InnerTube muncul tanpa login.
-2. Putar lagu streaming, matikan layar selama 5–10 menit (setelah konfigurasi HyperOS di §2): verifikasi audio terus berjalan lancar tanpa putus.
-3. Periksa notifikasi media di status bar & lockscreen: pastikan ikon kecil adalah glyph putih `ic_notification`, tombol Play/Pause/Next/Prev berfungsi, dan cabut earphone Bluetooth otomatis menjeda audio (`handleAudioBecomingNoisy`).
-4. Matikan internet dan coba putar lagu yang baru selesai diputar: verifikasi pemutaran ulang memanfaatkan cache audio 500 MB.
+### A. Impor SAF Lokal, File Dihapus & Pemisahan Sumber (B7 & B12)
+1. Buka **Pustaka**, alihkan switch header ke **Lokal (ikon ponsel)**: pastikan layar kosong bersih (TIDAK menarik audio WhatsApp/sistem otomatis) dan menampilkan tombol **Impor Lagu** & **Impor Folder**.
+2. Ketuk **Impor Lagu** → pilih beberapa file MP3/FLAC: pastikan judul, artis, album, durasi, dan sampul terkompresi muncul rapi tanpa `"0:00"` dan tanpa baris kedua `"Lokal"` jika tag artis/album ada.
+3. Ketuk **Impor Folder** → pilih 1 folder musik: pastikan seluruh lagu dalam folder terimpor dan tetap terbaca setelah aplikasi ditutup paksa & dibuka kembali (`takePersistableUriPermission`).
+4. Letakkan file `.lrc` bernama sama di folder musik tersebut → putar lagunya → buka Lirik → pastikan label sumber menunjukkan **`File .lrc`**.
+5. Hapus atau pindahkan salah satu file lagu lokal lewat File Manager Android → coba putar lagu tersebut di Mupa: pastikan aplikasi **tidak crash**, menampilkan pesan yang jelas, dan skip aman ke lagu berikutnya. Ketuk **Pindai Ulang** di Pustaka Lokal → pastikan file yang hilang tidak lagi tampil.
+6. Alihkan switch ke **Streaming (ikon awan)**: pastikan daftar Streaming & Lokal tidak pernah tercampur.
 
-### E. Mode Lokal (Scoped Storage + Rust JNI) & "Hapus Nama Artis"
-1. Pastikan file MP3/FLAC lokal dengan format nama `"Artis - Judul (Official Audio).flac"` ada di folder `Music/` perangkat.
-2. Buka **Pustaka → chip Lokal**: pastikan file terdeteksi lewat MediaStore/Scoped Storage.
-3. Buka **Pengaturan → Hapus Nama Artis dari Judul**: matikan lalu nyalakan kembali — pastikan nama artis pulih utuh dari `originalFileName` (non-destruktif).
-4. Uji **Akun → Pengaturan → Equalizer 5-Band** (di Now Playing tombol **EQ**): bandingkan preset `Flat`, `Bass`, `Vocal`, `Treble`, dan `Warm` pada earphone untuk memastikan perubahan frekuensi terdengar nyata tanpa distorsi/clipping.
+### B. Player Mini ↔ Full, Half-Drag, Rotasi, Cinema & Back Bertahap (B6 & B11)
+1. Putar lagu → pastikan **Mini Player** solid rapi (tombol Play/Pause koral 40dp, tidak ada teks daftar tembus di belakangnya).
+2. **Tap** Mini Player → pastikan Full Now Playing terbuka penuh tanpa kedip hitam dan tanpa pantulan.
+3. Uji **drag-up / drag-down 1:1** cepat 10× dan **half-drag release** (tarik 35% lalu lepas → kembali ke posisi asal; tarik 55% lalu lepas → lanjut ke tujuan).
+4. **Rotasi layar** saat Full Now Playing terbuka → pastikan sheet tetap terbuka dan tidak macet di posisi setengah.
+5. Ketuk ikon **Cinema** → pastikan masuk layar penuh dengan backdrop blur one-shot (atau `#000000` di Mode OLED), tunggu **3 detik** tanpa sentuh saat lagu diputar → kontrol bawah memudar otomatis; ketuk layar → kontrol muncul lagi.
+6. Uji **Back bertahap**: dari Cinema tekan Back → kembali ke Full Now Playing; buka Antrean/EQ/Lirik lalu tekan Back → tutup overlay; tekan Back lagi → ciutkan Full ke Mini Player.
+7. Uji **Antrean**: tekan tahan (`long-press`) pegangan drag untuk ubah urutan lagu, geser baris ke kiri untuk hapus, ketuk **Bersihkan** untuk menghapus lagu berikutnya.
 
-### F. Mode OLED, Gaya Kaca & Mode Performa (HP Spek Rendah)
-1. Di **Pengaturan**, ganti **Gaya Kaca** antara `Crystal` dan `Liquid+`: amati perbedaan kejernihan & rim kaca pada Floating Bottom Nav & kartu.
-2. Aktifkan **Mode OLED**: pastikan latar menjadi `#000000` murni, Aurora & blur nonaktif total.
-3. Matikan OLED, aktifkan **Mode Performa**: pastikan blur & warna dinamis sampul nonaktif untuk menghemat GPU/baterai.
-4. Uji di Pengaturan font sistem Android diperbesar (**Large / Largest**): pastikan tidak ada teks terpotong/tumpang tindih parah di Bottom Nav, Onboarding, maupun Player.
+### C. Lirik Cepat, Wipe OKLCH, Offset & Cache Offline (R4)
+1. Putar lagu streaming populer (mis. *blue — yung kai*) → ketuk ikon **Lirik** di Full Now Playing:
+   - Pastikan loading menampilkan skeleton (bukan layar kosong/beku), playback tidak tersendat.
+   - Amati transisi antar baris cepat: auto-scroll halus memusatkan baris aktif di ~40% layar, tidak ada lonjakan tinggi baris, dan sapuan warna OKLCH terbaca terang bahkan pada cover gelap.
+2. Scroll manual ke baris lain → pastikan auto-scroll berhenti sementara **~3 detik**, lalu ketuk salah satu baris → lagu langsung seek ke timestamp tersebut.
+3. Uji tombol **Offset ±0,5 dtk** dan ketuk teks offset untuk reset ke `0,0 dtk`.
+4. Matikan internet dan buka ulang lagu yang sama → pastikan lirik langsung tampil dari **cache Room** (TTL 30 hari).
+
+### D. Permukaan Melayang (Solid / Crystal / Liquid+), OLED, Performa & 120 Hz (B1, B8, B10)
+1. Scroll panjang daftar di Beranda & Cari pada default **Solid**: pastikan **0 teks tembus** di belakang Mini Player & Bottom Nav.
+2. Di tab **Akun → Permukaan Melayang**, coba **Crystal** lalu **Liquid+** (Android 12+ / API 31+): periksa kualitas blur Haze & kestabilan frame rate 120 Hz; jika ada artefak GPU, kembalikan ke **Solid**.
+3. Aktifkan **Mode OLED**: pastikan latar `#000000` murni di Beranda, Now Playing, dan Cinema; Aurora & blur mati total.
+4. Aktifkan **Mode Performa**: pastikan blur, tint cover dinamis, dan backdrop blur Cinema nonaktif.
+5. Perbesar ukuran font sistem Android ke **Besar (1.3×)**: periksa Beranda, Cari, Pustaka, Akun, dan Now Playing agar tetap rapi.
+
+### E. Ikon Launcher, Themed Icon, Notifikasi & HyperOS Background
+1. Periksa ikon Mupa di launcher (bulat/squircle/kotak) dan aktifkan *Themed Icons* Android 13+.
+2. Cek cold start splash screen (`#16161A` + glyph terpusat).
+3. Putar lagu streaming → matikan layar 15 menit (setelah setelan §2) → pastikan audio tidak mati; cabut earphone Bluetooth → pastikan otomatis jeda; jeda lagu lalu geser aplikasi dari Recents → pastikan notifikasi & service berhenti bersih (`onTaskRemoved`).
+4. Cek LeakCanary di build **Debug**: lakukan 5× siklus buka-tutup layar, player, Cinema, dan rotasi → pastikan tidak ada notifikasi leak memori.

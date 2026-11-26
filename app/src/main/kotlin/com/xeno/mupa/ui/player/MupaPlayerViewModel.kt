@@ -57,6 +57,9 @@ class MupaPlayerViewModel @Inject constructor(
     private var positionSyncJob: Job? = null
     private var lyricsFetchJob: Job? = null
 
+    @Volatile
+    private var isCleared: Boolean = false
+
     private val playerListener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             _uiState.update { it.copy(isPlaying = isPlaying) }
@@ -165,8 +168,16 @@ class MupaPlayerViewModel @Inject constructor(
         controllerFuture = future
         future.addListener(
             {
+                if (isCleared) {
+                    MediaController.releaseFuture(future)
+                    return@addListener
+                }
                 runCatching { future.get() }
                     .onSuccess { controller ->
+                        if (isCleared) {
+                            controller.release()
+                            return@onSuccess
+                        }
                         mediaController = controller
                         controller.addListener(playerListener)
                         syncFromController(controller)
@@ -660,6 +671,8 @@ class MupaPlayerViewModel @Inject constructor(
     }
 
     override fun onCleared() {
+        isCleared = true
+        pendingCommand = null
         stopPositionSync()
         lyricsFetchJob?.cancel()
         mediaController?.removeListener(playerListener)
