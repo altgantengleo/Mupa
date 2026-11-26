@@ -7,6 +7,8 @@ pluginManagement {
                 includeGroupByRegex("androidx.*")
             }
         }
+        // Mirror resmi Google untuk Maven Central agar runner GitHub Actions tidak terkena HTTP 429
+        maven { url = uri("https://maven-central.storage-download.googleapis.com/maven2/") }
         mavenCentral()
         gradlePluginPortal()
     }
@@ -16,6 +18,8 @@ dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
         google()
+        // Mirror resmi Google untuk Maven Central sebelum repo.maven.apache.org (anti-429 di CI)
+        maven { url = uri("https://maven-central.storage-download.googleapis.com/maven2/") }
         mavenCentral()
         maven {
             url = uri("https://jitpack.io")
