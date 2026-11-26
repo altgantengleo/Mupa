@@ -5,72 +5,69 @@
 ---
 
 ## Status Saat Ini
-- **Tahap Aktif:** **Tahap 0 (Audit)** — **SELESAI**
-- **Gerbang Berikutnya:** Menunggu review & keputusan user terhadap `docs/QUESTIONS.md` sebelum memulai **Tahap 1 (UI/UX)**.
-- **Status Kode App:** Belum ada kode proyek Android/Rust yang dibuat atau diubah (Tahap 0 murni read-only + dokumentasi).
+- **Tahap Aktif:** **Tahap 1A (Fondasi Proyek, Tema/Brand, Ikon/Splash, Navigasi & Bottom Nav)** — **SELESAI**
+- **Branch Git:** `stage-1a/foundation` (bercabang dari `main` yang menyimpan commit Tahap 0 `570aae5`)
+- **Gerbang Berikutnya:** Menunggu persetujuan user untuk lanjut ke **Tahap 1B (Layar Penuh, Onboarding Artis, Fake Repositories, Player Mini↔Full, Lirik, Antrean, EQ)** serta pilihan final **Q7** sebelum Tahap 2.
 
 ---
 
-## Ringkasan Tahap
+## Ringkasan Tahap & Persentase Pekerjaan
 
-| Tahap | Status | Ringkasan |
-|---|---|---|
-| **Tahap 0: Audit** | **Selesai (menunggu persetujuan)** | Audit lengkap Mochy (lisensi, arsitektur, streaming, animasi, onboarding, design system), ekstraksi fitur `music-x-V8_5.html`, verifikasi aset logo/ikon Mupa, penyusunan 5 dokumen di `docs/`. |
-| **Tahap 1: UI/UX** | Belum mulai (tertahan gerbang Tahap 0) | Setup proyek Mupa + CI GitHub Actions, ikon/splash, design system, onboarding artis favorit, 4 tab, player mini↔full tanpa Semi & tanpa overshoot, lirik, antrean, EQ, fake repositories. |
-| **Tahap 2: Streaming** | Belum mulai | Klien InnerTube clean-room + penyedia alternatif terisolasi, Media3 service/session/notifikasi/cache/queue. |
-| **Tahap 3: Rust Local Mode** | Belum mulai | Crate Rust (import, scan folder, metadata/tag, DB lokal, rekomendasi lokal, Hapus Nama Artis) + UniFFI/JNI + unit test. |
-| **Tahap 4: Integrasi** | Belum mulai | Gabung streaming + lokal, lirik nyata, EQ nyata, backup/restore, uji stabilitas. |
-| **Tahap 5: Optimasi** | Belum mulai | Optimasi HP spek rendah, baseline profile, uji beban. |
+| Tahap | Status | Progres | Ringkasan |
+|---|---|---:|---|
+| **Tahap 0: Audit** | **Selesai & Disetujui** | 100% | Audit Mochy & `music-x-V8_5.html`, verifikasi aset, 5 dokumen `docs/`. |
+| **Tahap 1A: Fondasi UI/UX** | **Selesai (menunggu review)** | 100% *(~35% dari Tahap 1)* | Multi-modul Gradle (`:app`, `:core:model`, `:core:domain`, `:core:designsystem`), CI GitHub Actions, git lokal + `.gitignore`, tema Ember Editorial + OLED + warna dinamis cover, ikon adaptive/monochrome/notifikasi + splash, DataStore preferensi, navigasi 4 tab + floating glass bottom bar. |
+| **Tahap 1B: Layar & Player UI** | **Belum mulai** | 0% *(~65% dari Tahap 1 tersisa)* | Fake repositories, Onboarding Artis Favorit wajib (min 2, anjuran 4, maks 8), layar penuh Beranda/Cari/Pustaka/Akun/Pengaturan, Mini Player ↔ Full Now Playing (tanpa Semi, tanpa overshoot), Lirik wipe adaptif, Antrean, EQ 5-band. |
+| **Tahap 2: Streaming** | Belum mulai | 0% | Klien InnerTube + penyedia fallback terisolasi, Media3 service/session/notifikasi/cache/queue. |
+| **Tahap 3: Rust Local Mode** | Belum mulai | 0% | Crate Rust (import, scan folder, metadata/tag, DB lokal, rekomendasi lokal, Hapus Nama Artis) + UniFFI/JNI + unit test. |
+| **Tahap 4: Integrasi** | Belum mulai | 0% | Gabung streaming + lokal, lirik nyata, EQ nyata, backup/restore, uji stabilitas. |
+| **Tahap 5: Optimasi** | Belum mulai | 0% | Optimasi HP spek rendah, baseline profile, uji beban. |
 
----
-
-## Yang Sudah Selesai (Tahap 0)
-1. **Inspeksi workspace & aset:**
-   - Memverifikasi struktur root `d:\Music-X-Native` (`Mochy/Mochy-Music-main/`, `music-x-V8_5.html`, `assets/logo/`, `assets/android-res/`, `README.md`, `docs/`).
-   - Memastikan belum ada `.git` di root workspace.
-   - Memverifikasi hex warna langsung dari SVG & XML (`#FF5A3C`, `#16161A`, `#F6F4EF`), menghitung *safe zone* `ic_launcher_foreground.xml` (radius maks ~28,5dp < 33dp safe zone adaptive icon & < 36dp splash circle), memeriksa `ic_launcher_monochrome.xml` & `ic_notification.xml`, serta meninjau visual `mupa-sheet-original.png`, `mupa-lockup_from-sheet.png`, dan `mupa-wordmark_from-sheet_transparent.png`.
-2. **Audit lisensi & arsitektur Mochy:**
-   - Mengonfirmasi Mochy berlisensi **GPL-3.0**, serta memetakan lisensi dependensi (`NewPipeExtractor`, `innertubex`, `media3-ffmpeg-decoder`, `jamesdsp_eel2` = GPL; `libusb` = LGPL; AndroidX/Media3/Compose/Room/Hilt/Ktor/Coil = Apache-2.0/MIT).
-   - Memetakan 22 modul Gradle, DI Hilt, Room v47, navigasi ~60 route, DataStore `PreferencesCache`, playback Media3/ExoPlayer/MediaSession/notifikasi, onboarding `SetupWizardScreen` (mengonfirmasi tidak ada artist picker aktif, hanya jejak cold-start di `HomeViewModel`/`HomeRecommender`), dan workflow GitHub Actions Mochy.
-3. **Audit lapisan streaming Mochy:**
-   - Menginventarisasi seluruh penyedia audio (InnerTube, Monochrome, JioSaavn, Apple Music, modul dinamis Web/Code/Local), 14 penyedia lirik, 4 canvas/video, 3 metadata, 5 translasi, scrobble, Shazam, dan importer.
-   - Membedah 18 preset `YouTubeClient`, resolusi stream (InnerTubeX + `VISIONOS` + `CipherDeobfuscator` + yt-dlp EJS n-param + WebView BotGuard PoToken; memastikan SABR tidak dijalankan), fallback 2 lapis, retry/cache/queue, daftar titik rapuh, serta mengukur keterikatan UI (63/658 file UI & 23/51 ViewModel mengimpor `innertube`).
-4. **Audit mekanisme animasi & design system Mochy:**
-   - Mendokumentasikan mekanisme `BottomSheetState` (`Animatable<Dp>`, `progress 0f..1f`), `detectSheetDrag`, `MorphingCover` (`Modifier.layout`), `PlayerPageTransition` (2-frame pre-mount), daftar 27+ spring `dampingRatio < 1f` yang harus dihindari Mupa, mekanisme 120Hz, dan 6 penyebab flash hitam/kedip.
-5. **Ekstraksi fitur & perilaku `music-x-V8_5.html`:**
-   - Mendokumentasikan `:root` & Ultra Dynamic OKLab V15, Mode OLED (+ pixel shift), gaya glass (`Crystal` vs `Liquid+`), Aurora background, 4 tab (`Beranda`, `Cari`, `Pustaka`, `Akun`), formula eksak rekomendasi lokal (`Mix X 2.0`, `Ulangi lagi`, `Belum diputar`), inventaris fitur Semi Player yang dipindah ke Full, Lirik + wipe warna adaptif OKLCH `L>=0.87`, EQ 5-band, serta mekanisme non-destruktif `"Hapus Nama Artis"` (`originalFileName`).
-6. **Penyusunan dokumen Tahap 0:**
-   - [docs/AUDIT.md](AUDIT.md)
-   - [docs/BRAND-MAP.md](BRAND-MAP.md)
-   - [docs/ROADMAP.md](ROADMAP.md)
-   - [docs/QUESTIONS.md](QUESTIONS.md)
-   - [docs/PROGRESS.md](PROGRESS.md)
+- **Sisa Tahap 1 (UI/UX):** ~65% (Tahap 1B).
+- **Sisa Proyek Keseluruhan (Tahap 1B–5):** ~82%.
 
 ---
 
-## Keputusan yang Sudah Tetap (Dari Instruksi Awal)
-- **Brand:** 100% **Mupa** (nol sisa "Mochy" di mana pun; nol "Music X" di UI/resource/package).
-- **Lisensi & Clean-Room:** Tidak menyalin kode mentah dari Mochy (GPL-3.0); seluruh kode Mupa ditulis ulang dari nol berdasarkan pemahaman pola.
-- **Animasi:** Tanpa spring overshoot/bounce (`dampingRatio < 1f` dilarang); pakai easing halus (emphasized/decelerate) atau critically damped; stabil 60/120 Hz tanpa flash hitam.
-- **Mode Player:** Mode **Semi** dihapus, diganti transisi langsung **Mini ↔ Full**.
-- **Glass & OLED:** `RenderEffect` hanya di API 31+, fallback solid/translusen di bawahnya, menghormati toggle performa; Mode OLED sebagai 1 toggle.
-- **Onboarding:** Wajib pilih minimal 2 artis (anjuran 4), tanpa lewati, tersimpan di DataStore, muncul sekali, bisa diubah dari Akun/Pengaturan, tahan rotasi & process death, tombol Back keluar app.
-- **Build & Target:** Build via GitHub Actions; UI terpisah total di balik interface repository; local mode memakai Rust di Tahap 3.
+## Keputusan Final dari Gerbang Tahap 0
+- **Q1 (Nama Mix):** `Mix Mupa`
+- **Q2 (Palet):** **Opsi A — Ember Editorial** (`#FF5A3C` / `#FF7357` + `#FFB067` + `#F6F4EF` di atas `#0E0E11` / `#16161A`). Warna dinamis cover art tetap aktif untuk Aurora & Now Playing, dan ikut nonaktif di Mode OLED / Mode Performa. Teks di atas koral wajib gelap `#16161A`.
+- **Q3 (Wordmark):** Glyph SVG + teks Compose bersih (`mupa`); wordmark SVG bersih menyusul tanpa memblokir Tahap 1.
+- **Q4 (`applicationId`):** `com.xeno.mupa` (dengan `.debug` untuk build debug).
+- **Q5 (`minSdk`):** `26` (Android 8.0 Oreo; adaptive icon native tanpa fallback legacy).
+- **Q6 (Struktur & Git):** Proyek Gradle di root `d:\Music-X-Native/`; `Mochy/` dan `music-x-V8_5.html` masuk `.gitignore`; `git init` lokal; tanpa token/rahasia di repo/log/commit.
+- **Q8 (Batas Artis Onboarding):** Min 2, anjuran 4, maksimal 8.
+- **Q9 (Lingkup Pengaturan & Akun):** Pengaturan minimal (`Crystal`/`Liquid+`, Mode OLED, Aurora, Mode Performa, Hapus Nama Artis, Ubah Artis Favorit) & Tab Akun ringkas.
 
 ---
 
-## Tertunda (Menunggu Jawaban User di `docs/QUESTIONS.md`)
-- [ ] **Q1:** Nama pengganti `"Mix X"` (usul: `Mix Mupa`)
-- [ ] **Q2:** Pilihan palet aksen (Opsi A Ember Editorial / Opsi B Minimal Studio / Opsi C Contrast Dusk) + konfirmasi dynamic cover tint
-- [ ] **Q3:** Wordmark pakai glyph SVG + tipografi Compose bersih atau suplai SVG wordmark
-- [ ] **Q4:** Konfirmasi `applicationId = com.xeno.mupa`
-- [ ] **Q5:** Pilihan `minSdk` (`26` rekomendasi vs `24`)
-- [ ] **Q6:** Lokasi root Gradle Mupa & inisialisasi `git init` lokal
-- [ ] **Q7:** Model lisensi Mupa untuk Tahap 2 (Bebas GPL clean-room murni vs Open-Source GPL-3.0)
-- [ ] **Q8:** Batas maksimal pilihan artis onboarding (usul: `8`)
-- [ ] **Q9:** Lingkup minimal Pengaturan & tampilan Tab Akun di Tahap 1
+## Yang Sudah Selesai di Tahap 1A
+1. **Git & CI:**
+   - Inisialisasi repo lokal (`main` commit Tahap 0 `570aae5`), `.gitignore` mengecualikan `Mochy/`, `music-x-*.html`, `local.properties`, keystore/rahasia.
+   - Branch `stage-1a/foundation` + workflow `.github/workflows/android-ci.yml` (`testDebugUnitTest`, `lintDebug`, `assembleDebug`, upload artifact APK & lint report).
+   - Gradle Wrapper resmi `8.13` (`gradlew`, `gradlew.bat`, `gradle-wrapper.jar`).
+2. **Struktur Multi-Modul:**
+   - `:core:model` (pure Kotlin: `Track`, `Artist`, `Album`, `Playlist`, `LyricsLine`, `AudioSourceType`, `GlassStyle`, `UserPreferences`).
+   - `:core:domain` (pure Kotlin interfaces: `MusicSource`, `StreamProvider`, `ArtistRepository`, `PreferencesRepository`).
+   - `:core:designsystem` (`MupaColors` Ember Editorial + OLED, `MupaTypography`, `MupaShapes`, `MupaMotion` nol overshoot, `MupaTheme`, `MupaLogoGlyph` & `MupaBrandMark`, `MupaAuroraBackground`, `MupaGlassSurface` Crystal/Liquid+ dengan `RenderEffect` API 31+ & fallback <31, `@Preview`).
+   - `:app` (`com.xeno.mupa`, `minSdk 26`, `compileSdk/targetSdk 35`, Hilt, DataStore `DataStorePreferencesRepository`, `MainActivity` + `core-splashscreen` + edge-to-edge).
+3. **Ikon & Splash:**
+   - Seluruh 6 file dari `assets/android-res/` disalin identik (SHA-256 cocok 100%) ke `app/src/main/res/` tanpa mengubah desain.
+   - Terhubung di `AndroidManifest.xml` (`@mipmap/ic_launcher`, `@mipmap/ic_launcher_round`) dan `Theme.Mupa.Splash` (`#16161A` + `ic_launcher_foreground`).
+   - `ic_notification.xml` terverifikasi valid dan dijaga oleh `res/raw/keep.xml` hingga pemutar dibuat di Tahap 2.
+4. **Navigasi & Floating Glass Bottom Nav:**
+   - 4 tab utama: `Beranda`, `Cari`, `Pustaka`, `Akun` (`MupaTopLevelDestination`, `MupaNavHost` bertransisi Emphasized Decelerate tanpa overshoot, state-preserving per tab).
+   - `MupaFloatingBottomBar` bergaya `Crystal`/`Liquid+`/OLED dengan indikator pil geser halus tanpa bounce, target sentuh ≥ 48dp, `contentDescription` lengkap, dan `@Preview`.
+   - Placeholder interaktif 4 tab (termasuk kontrol langsung Mode OLED, Gaya Kaca, Aurora, Mode Performa, & pratinjau warna sampul dinamis).
+
+---
+
+## Tertunda
+- [ ] **Q7 (untuk Tahap 2):** User mencantumkan kedua opsi (`GPL-3.0` dan `Clean-room`) saat balasan Tahap 0; perlu memilih **salah satu** sebelum masuk Tahap 2 (tidak memblokir Tahap 1B).
+- [ ] **Tahap 1B:** Onboarding Artis Favorit wajib, Fake repositories, layar penuh 4 tab + Pengaturan, Mini Player ↔ Full Now Playing (tanpa Semi, tanpa overshoot), Lirik wipe adaptif, Antrean, EQ 5-band.
+- [ ] **Wordmark SVG bersih:** Opsional menyusul dari user bila ingin mengganti teks tipografi Compose `mupa`.
 
 ---
 
 ## Log Riwayat
-- **2026-11-26:** Tahap 0 dimulai dan diselesaikan (read-only audit + 5 dokumen `docs/`). Berhenti di gerbang Tahap 0 menunggu review & keputusan user.
+- **2026-11-26:** Tahap 0 selesai & disetujui user.
+- **2026-11-26:** Tahap 1A selesai di branch `stage-1a/foundation` (build, lint, unit test, dan brand grep lulus). Berhenti menunggu review user.

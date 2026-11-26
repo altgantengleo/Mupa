@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Mupa</string>
+
+    <!-- Bottom Navigation Tabs -->
+    <string name="nav_home">Beranda</string>
+    <string name="nav_search">Cari</string>
+    <string name="nav_library">Pustaka</string>
+    <string name="nav_account">Akun</string>
+
+    <!-- Accessibility -->
+    <string name="cd_bottom_nav">Navigasi utama Mupa</string>
+    <string name="cd_tab_selected">%1$s, dipilih</string>
+</resources>

@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Menjaga ic_notification tetap valid di Tahap 1 hingga dipasang pada layanan notifikasi pemutar di Tahap 2. -->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@drawable/ic_notification" />

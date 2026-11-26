@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Exact source path from assets/logo/mupa-glyph-accent-ondark.svg (viewBox 96x96). Do not alter geometry. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="96dp"
+    android:height="96dp"
+    android:viewportWidth="96"
+    android:viewportHeight="96">
+    <path
+        android:fillColor="#F6F4EF"
+        android:pathData="M20 66V42A16 16 0 0 1 48 31.417A16 16 0 0 1 76 42H68A8 8 0 0 0 52 42V66A4 4 0 0 1 44 66V42A8 8 0 0 0 28 42V66A4 4 0 0 1 20 66Z" />
+    <path
+        android:fillColor="#FF5A3C"
+        android:pathData="M68 41.5H76V66A4 4 0 0 1 68 66Z" />
+</vector>
