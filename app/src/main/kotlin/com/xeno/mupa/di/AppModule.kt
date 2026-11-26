@@ -14,6 +14,7 @@ import com.xeno.mupa.core.domain.PreferencesRepository
 import com.xeno.mupa.data.preferences.DataStorePreferencesRepository
 import com.xeno.mupa.data.streaming.StreamingArtistRepository
 import com.xeno.mupa.data.streaming.StreamingMusicSource
+import com.xeno.mupa.engine.local.ScopedStorageAudioScanner
 import com.xeno.mupa.playback.MupaAudioCache
 import com.xeno.mupa.playback.PlaybackServiceConfig
 import com.xeno.mupa.playback.QueuePersistenceStore
@@ -84,6 +85,12 @@ object AppInfrastructureModule {
         @ApplicationContext context: Context,
         config: PlaybackServiceConfig,
     ): MupaAudioCache = MupaAudioCache(context, config.audioCacheMaxBytes)
+
+    @Provides
+    @Singleton
+    fun provideScopedStorageAudioScanner(
+        @ApplicationContext context: Context,
+    ): ScopedStorageAudioScanner = ScopedStorageAudioScanner(context)
 
     @Provides
     @Singleton

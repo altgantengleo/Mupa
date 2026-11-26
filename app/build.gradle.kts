@@ -71,6 +71,7 @@ dependencies {
     implementation(project(":streaming:jiosaavn"))
     implementation(project(":streaming:aggregator"))
     implementation(project(":playback"))
+    implementation(project(":engine:local"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.core.splashscreen)

@@ -5,7 +5,7 @@
 ---
 
 ## Status Saat Ini
-- **Tahap Aktif:** **Tahap 2 (Streaming & Media3 Playback Service)** — **SELESAI** · Lanjut ke **Tahap 3 (Local Mode Rust + UniFFI + Scoped Storage)**
+- **Tahap Aktif:** **Tahap 3 (Local Mode Rust + UniFFI + Scoped Storage)** — **SELESAI** · Lanjut ke **Tahap 4 (Integrasi Penuh, Lirik, EQ 5-Band, Backup/Restore)**
 - **Branch Git:** `stage-1a/foundation` (commit terpisah per tahap)
 - **Lisensi:** **GPL-3.0** (`LICENSE` & `NOTICE` aktif)
 
@@ -18,9 +18,10 @@
 | **Tahap 0: Audit** | **Selesai** | 100% | Audit Mochy & `music-x-V8_5.html`, 5 dokumen `docs/`. |
 | **Tahap 1A: Fondasi UI/UX** | **Selesai** (`8565704`) | 100% | Multi-modul Gradle, CI, tema Ember Editorial + OLED, ikon/splash, DataStore, navigasi 4 tab, floating bottom nav. |
 | **Tahap 1B: Player, Lirik, Antrean** | **Selesai** (`bfdf8fe`) | 100% | `MupaPlayerSheetState` (1 state progres 0..1 di layout/draw, nol overshoot, anti-kedip), Mini↔Full (tanpa Semi), Lirik wipe adaptif, Antrean + 2-frame pre-mount. |
-| **Tahap 1C: Layar Penuh & Onboarding** | **Selesai** (`536f9b7`) | 100% | Fake repositories, Onboarding Artis wajib, Beranda, Cari, Pustaka, Akun, Pengaturan, 12/12 unit test lulus. |
-| **Tahap 2: Streaming** | **Selesai** | 100% | `:streaming:api`, `:streaming:innertube` (toleran + NewPipeExtractor terisolasi), `:streaming:jiosaavn`, `:streaming:aggregator` (registry+fallback+circuit breaker+URL cache thread-safe), `:playback` (`MupaPlaybackService` Media3, MediaSession, `ic_notification`, 500 MB `SimpleCache`, JSON `QueuePersistenceStore`), `docs/STREAMING.md`, 22/22 unit test lulus (offline fixtures), lint 0 error. |
-| **Tahap 3: Rust Local Mode** | **Sedang dikerjakan** | 0% | Workspace Rust `engine/local-rust/` (tag reader via fd/bytes, SQLite DB, rekomendasi Mix Mupa/Ulangi Lagi/Belum Diputar, Hapus Nama Artis non-destruktif, UniFFI), Scoped Storage Kotlin bridge, `cargo-ndk` CI, unit test. |
+| **Tahap 1C: Layar Penuh & Onboarding** | **Selesai** (`536f9b7`) | 100% | Fake repositories, Onboarding Artis wajib, Beranda, Cari, Pustaka, Akun, Pengaturan. |
+| **Tahap 2: Streaming** | **Selesai** (`c2e93da`) | 100% | `:streaming:*`, `:playback` Media3 + 500 MB cache + JSON queue, `docs/STREAMING.md`. |
+| **Tahap 3: Rust Local Mode** | **Selesai** | 100% | Workspace Rust `engine/local-rust/` (`lofty`, `rusqlite`, `uniffi`, Mix Mupa MMR, Hapus Nama Artis non-destruktif), `:engine:local` (Scoped Storage MediaStore/SAF + cermin algoritma), integrasi artis lokal ke Onboarding/Beranda, job `cargo test` + `cargo-ndk` (`arm64-v8a`, `x86_64`) di CI. *(Catatan: `cargo` tidak terpasang di PC ini sehingga kompilasi/uji Rust akan diverifikasi di GitHub Actions CI.)* |
+| **Tahap 4: Integrasi** | **Sedang dikerjakan** | 0% | Lirik nyata (LRC parser + LRCLib online + tag tersemat), EQ 5-band nyata (Media3 `BaseAudioProcessor` + UI sheet), Backup/Restore JSON (tanpa rahasia), uji stabilitas. |
 | **Tahap 2: Streaming** | Belum mulai | 0% | Klien InnerTube + penyedia fallback terisolasi, Media3 service/session/notifikasi/cache/queue. |
 | **Tahap 3: Rust Local Mode** | Belum mulai | 0% | Crate Rust (import, scan folder, metadata/tag, DB lokal, rekomendasi lokal, Hapus Nama Artis) + UniFFI/JNI + unit test. |
 | **Tahap 4: Integrasi** | Belum mulai | 0% | Gabung streaming + lokal, lirik nyata, EQ nyata, backup/restore, uji stabilitas. |
