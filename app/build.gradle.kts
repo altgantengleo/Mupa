@@ -15,10 +15,19 @@ android {
         applicationId = "com.xeno.mupa"
         minSdk = 26
         targetSdk = 35
-        versionCode = 5
-        versionName = "1.0.0-rc1"
+        versionCode = 1
+        versionName = "1.0.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+    }
+
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "x86_64")
+            isUniversalApk = true
+        }
     }
 
     buildTypes {
@@ -96,8 +105,12 @@ dependencies {
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.hilt.navigation.compose)
     implementation(libs.androidx.datastore.preferences)
+    implementation(libs.androidx.media3.common)
+    implementation(libs.androidx.media3.session)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.okhttp)
+    implementation(libs.coil.compose)
+    implementation(libs.coil.network.okhttp)
 
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)

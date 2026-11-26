@@ -121,4 +121,14 @@ class InnerTubeParserFixtureTest {
         assertTrue(result.isFailure)
         assertTrue(result.exceptionOrNull() is StreamingError.ParseError)
     }
+
+    @Test
+    fun upscalesGoogleThumbnailUrlsToHdAndExtractsVisitorData() {
+        val lowRes = "https://yt3.googleusercontent.com/abc123=w60-h60-p-l90-rj"
+        val hd = InnerTubeParser.upscaleArtworkUrl(lowRes)
+        assertEquals("https://yt3.googleusercontent.com/abc123=w544-h544-p-l90-rj", hd)
+
+        val visitorJson = """{"responseContext":{"visitorData":"CgtVisitor12345"}}"""
+        assertEquals("CgtVisitor12345", InnerTubeParser.extractVisitorData(visitorJson))
+    }
 }

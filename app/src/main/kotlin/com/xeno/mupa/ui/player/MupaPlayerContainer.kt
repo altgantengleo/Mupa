@@ -43,6 +43,7 @@ import androidx.compose.material.icons.rounded.SkipPrevious
 import androidx.compose.material.icons.rounded.Timer
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -50,6 +51,8 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.ui.layout.ContentScale
+import coil3.compose.AsyncImage
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -653,6 +656,19 @@ private fun FullNowPlayingContent(
 
         Spacer(modifier = Modifier.height(12.dp))
 
+        playerState.errorMessage?.let { err ->
+            Text(
+                text = err,
+                style = MaterialTheme.typography.labelMedium,
+                color = MupaPalette.CoralSoft,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(bottom = 8.dp),
+            )
+        }
+
         // 5 Kontrol Transport Utama
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -684,12 +700,20 @@ private fun FullNowPlayingContent(
                     .clip(CircleShape)
                     .background(MupaPalette.CoralPrimary),
             ) {
-                Icon(
-                    imageVector = if (playerState.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                    contentDescription = if (playerState.isPlaying) "Jeda" else "Putar",
-                    tint = MupaPalette.LogoCharcoal,
-                    modifier = Modifier.size(36.dp),
-                )
+                if (playerState.isBuffering) {
+                    CircularProgressIndicator(
+                        color = MupaPalette.LogoCharcoal,
+                        strokeWidth = 3.dp,
+                        modifier = Modifier.size(28.dp),
+                    )
+                } else {
+                    Icon(
+                        imageVector = if (playerState.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                        contentDescription = if (playerState.isPlaying) "Jeda" else "Putar",
+                        tint = MupaPalette.LogoCharcoal,
+                        modifier = Modifier.size(36.dp),
+                    )
+                }
             }
             IconButton(
                 onClick = onSkipNext,
@@ -812,7 +836,7 @@ fun TrackArtworkTile(
         modifier = modifier.background(
             brush = Brush.linearGradient(
                 colors = listOf(
-                    base.copy(alpha = 0.92f),
+                    base.copy(alpha = 0.85f),
                     MupaPalette.SurfaceContainerHigh,
                 ),
             ),
@@ -822,9 +846,17 @@ fun TrackArtworkTile(
         Icon(
             imageVector = Icons.Rounded.MusicNote,
             contentDescription = null,
-            tint = MupaPalette.LogoCream.copy(alpha = 0.88f),
+            tint = MupaPalette.LogoCream.copy(alpha = 0.72f),
             modifier = Modifier.size(iconSize),
         )
+        if (!track.artworkUrl.isNullOrBlank()) {
+            AsyncImage(
+                model = track.artworkUrl,
+                contentDescription = track.title,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier.fillMaxSize(),
+            )
+        }
     }
 }
 

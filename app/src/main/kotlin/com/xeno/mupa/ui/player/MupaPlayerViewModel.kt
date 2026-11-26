@@ -1,15 +1,26 @@
 package com.xeno.mupa.ui.player
 
+import android.content.ComponentName
+import android.content.Context
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
+import androidx.media3.common.Player
+import androidx.media3.session.MediaController
+import androidx.media3.session.SessionToken
+import com.google.common.util.concurrent.ListenableFuture
 import com.xeno.mupa.core.model.AudioSourceType
 import com.xeno.mupa.core.model.LyricsLine
 import com.xeno.mupa.core.model.Track
+import com.xeno.mupa.playback.MupaPlaybackService
 import com.xeno.mupa.playback.QueuePersistenceStore
 import com.xeno.mupa.playback.eq.EqPreset
 import com.xeno.mupa.playback.eq.FiveBandEqualizerProcessor
 import com.xeno.mupa.streaming.api.StreamingLyricsProvider
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -21,100 +32,142 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 /**
- * ViewModel player terhubung dengan QueuePersistenceStore, FiveBandEqualizerProcessor,
- * dan StreamingLyricsProvider (LRCLib) pada Tahap 4.
+ * ViewModel pemutar Mupa yang terhubung langsung ke MupaPlaybackService melalui Media3 MediaController.
+ * - Resolusi stream streaming dilakukan lazy di MupaPlaybackService via ProviderRegistry (VISIONOS -> VR -> IOS -> NewPipe -> JioSaavn).
+ * - Pemutaran file lokal langsung memakai URI Scoped Storage (content://).
+ * - Posisi pemutaran disinkronkan langsung dari ExoPlayer (tidak ada ticker simulasi palsu).
  */
 @HiltViewModel
 class MupaPlayerViewModel @Inject constructor(
+    @ApplicationContext private val appContext: Context,
     private val queueStore: QueuePersistenceStore,
     private val equalizerProcessor: FiveBandEqualizerProcessor,
     private val lyricsProvider: StreamingLyricsProvider,
 ) : ViewModel() {
 
-    private val sampleTracks: List<Track> = listOf(
-        Track(
-            id = "demo-1",
-            title = "Senja di Kota Tua",
-            artistName = "Hindia",
-            albumTitle = "Lagipula Hidup Akan Berakhir",
-            durationMs = 214_000L,
-            accentColorArgb = 0xFFFF5A3C,
-            sourceType = AudioSourceType.STREAMING,
-            isFavorite = true,
-            playCount = 14,
-        ),
-        Track(
-            id = "demo-2",
-            title = "Lampu Lalu Lintas",
-            artistName = "Nadin Amizah",
-            albumTitle = "Untuk Dunia, Cinta, dan Kotornya",
-            durationMs = 238_000L,
-            accentColorArgb = 0xFF4ECDC4,
-            sourceType = AudioSourceType.LOCAL,
-            originalFileName = "Nadin Amizah - Lampu Lalu Lintas (Official Audio).flac",
-            isFavorite = false,
-            playCount = 7,
-        ),
-        Track(
-            id = "demo-3",
-            title = "Malam Tanpa Bintang",
-            artistName = "Tulus",
-            albumTitle = "Manusia",
-            durationMs = 196_000L,
-            accentColorArgb = 0xFFE07A5F,
-            sourceType = AudioSourceType.STREAMING,
-            isFavorite = true,
-            playCount = 21,
-        ),
-        Track(
-            id = "demo-4",
-            title = "Ruang Hening",
-            artistName = "Reality Club",
-            albumTitle = "Reality Club Presents...",
-            durationMs = 225_000L,
-            accentColorArgb = 0xFF7AA2F7,
-            sourceType = AudioSourceType.LOCAL,
-            originalFileName = "Reality Club - Ruang Hening.mp3",
-            isFavorite = false,
-            playCount = 0,
-        ),
-    )
-
-    private val sampleLyricsByTrack: Map<String, List<LyricsLine>> = mapOf(
-        "demo-1" to listOf(
-            LyricsLine(0L, 4_200L, "Langit jingga mulai turun di ujung jalan"),
-            LyricsLine(4_200L, 8_600L, "Langkah pelan menyusuri sisa kenangan"),
-            LyricsLine(8_600L, 13_400L, "Lampu kota menyala satu per satu"),
-            LyricsLine(13_400L, 18_200L, "Menemani nada yang berputar di kepala"),
-            LyricsLine(18_200L, 23_000L, "Tak perlu tergesa mengejar esok hari"),
-            LyricsLine(23_000L, 28_400L, "Biarkan irama tenang menuntun malam ini"),
-            LyricsLine(28_400L, 34_000L, "Di antara riuh yang perlahan mereda"),
-            LyricsLine(34_000L, 40_000L, "Kita temukan ruang untuk bernapas lagi"),
-        ),
-        "demo-2" to listOf(
-            LyricsLine(0L, 4_800L, "Merah menyala menahan laju waktu"),
-            LyricsLine(4_800L, 9_500L, "Kuning berkedip di sudut pandangmu"),
-            LyricsLine(9_500L, 14_800L, "Hijau terbuka membawa langkah baru"),
-            LyricsLine(14_800L, 20_400L, "Semua cerita tersimpan di saku rindu"),
-        ),
-    )
-
-    private val _uiState = MutableStateFlow(
-        MupaPlayerUiState(
-            currentTrack = sampleTracks.first(),
-            queue = sampleTracks,
-            currentIndex = 0,
-            isPlaying = false,
-            positionMs = 6_400L,
-            durationMs = sampleTracks.first().durationMs,
-            lyrics = sampleLyricsByTrack["demo-1"].orEmpty(),
-        ),
-    )
+    private val _uiState = MutableStateFlow(MupaPlayerUiState())
     val uiState: StateFlow<MupaPlayerUiState> = _uiState.asStateFlow()
 
-    private var tickerJob: Job? = null
+    private var controllerFuture: ListenableFuture<MediaController>? = null
+    private var mediaController: MediaController? = null
+    private var pendingCommand: ((MediaController) -> Unit)? = null
+    private var positionSyncJob: Job? = null
+
+    private val playerListener = object : Player.Listener {
+        override fun onIsPlayingChanged(isPlaying: Boolean) {
+            _uiState.update { it.copy(isPlaying = isPlaying) }
+            if (isPlaying) {
+                startPositionSync()
+            } else {
+                stopPositionSync()
+                persistCurrentQueue()
+            }
+        }
+
+        override fun onPlaybackStateChanged(playbackState: Int) {
+            val ctrl = mediaController
+            val buffering = playbackState == Player.STATE_BUFFERING
+            val realDuration = ctrl?.duration?.takeIf { it > 0L }
+            _uiState.update { state ->
+                state.copy(
+                    isBuffering = buffering,
+                    durationMs = realDuration ?: state.durationMs,
+                    errorMessage = if (playbackState == Player.STATE_READY) null else state.errorMessage,
+                )
+            }
+        }
+
+        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            val ctrl = mediaController ?: return
+            val idx = ctrl.currentMediaItemIndex
+            val queue = _uiState.value.queue
+            if (idx in queue.indices) {
+                val track = queue[idx]
+                val realDur = ctrl.duration.takeIf { it > 0L } ?: track.durationMs.coerceAtLeast(1_000L)
+                _uiState.update {
+                    it.copy(
+                        currentIndex = idx,
+                        currentTrack = track,
+                        positionMs = 0L,
+                        durationMs = realDur,
+                        lyrics = emptyList(),
+                        lyricsOffsetMs = 0L,
+                        errorMessage = null,
+                    )
+                }
+                persistCurrentQueue()
+                if (_uiState.value.activeOverlay == PlayerOverlayPane.LYRICS) {
+                    fetchLyricsForCurrentTrack()
+                }
+            }
+        }
+
+        override fun onPlayerError(error: PlaybackException) {
+            stopPositionSync()
+            val detail = error.cause?.message?.takeIf { it.isNotBlank() }
+                ?: error.message?.takeIf { it.isNotBlank() }
+                ?: "Kode ${error.errorCodeName}"
+            _uiState.update {
+                it.copy(
+                    isPlaying = false,
+                    isBuffering = false,
+                    errorMessage = "Gagal memutar audio: $detail",
+                )
+            }
+        }
+    }
 
     init {
+        connectToPlaybackService()
+        restorePersistedQueue()
+    }
+
+    private fun connectToPlaybackService() {
+        val token = SessionToken(appContext, ComponentName(appContext, MupaPlaybackService::class.java))
+        val future = MediaController.Builder(appContext, token).buildAsync()
+        controllerFuture = future
+        future.addListener(
+            {
+                runCatching { future.get() }
+                    .onSuccess { controller ->
+                        mediaController = controller
+                        controller.addListener(playerListener)
+                        syncFromController(controller)
+                        pendingCommand?.let { cmd ->
+                            pendingCommand = null
+                            cmd(controller)
+                        }
+                    }
+                    .onFailure { err ->
+                        _uiState.update {
+                            it.copy(
+                                isBuffering = false,
+                                errorMessage = "Gagal terhubung ke layanan pemutar: ${err.message}",
+                            )
+                        }
+                    }
+            },
+            ContextCompat.getMainExecutor(appContext),
+        )
+    }
+
+    private fun syncFromController(controller: MediaController) {
+        val playing = controller.isPlaying
+        val buffering = controller.playbackState == Player.STATE_BUFFERING
+        val pos = controller.currentPosition.coerceAtLeast(0L)
+        val dur = controller.duration.takeIf { it > 0L }
+        _uiState.update { state ->
+            state.copy(
+                isPlaying = playing,
+                isBuffering = buffering,
+                positionMs = pos,
+                durationMs = dur ?: state.durationMs,
+            )
+        }
+        if (playing) startPositionSync()
+    }
+
+    private fun restorePersistedQueue() {
         viewModelScope.launch(Dispatchers.IO) {
             val restored = queueStore.load() ?: return@launch
             if (restored.items.isNotEmpty()) {
@@ -132,19 +185,44 @@ class MupaPlayerViewModel @Inject constructor(
                 }
                 val safeIndex = restored.currentIndex.coerceIn(0, restoredTracks.lastIndex)
                 val current = restoredTracks[safeIndex]
-                _uiState.update {
-                    it.copy(
+                _uiState.update { state ->
+                    if (state.queue.isNotEmpty()) return@update state
+                    state.copy(
                         queue = restoredTracks,
                         currentIndex = safeIndex,
                         currentTrack = current,
                         positionMs = restored.positionMs.coerceIn(0L, current.durationMs.coerceAtLeast(1L)),
                         durationMs = current.durationMs.coerceAtLeast(1_000L),
-                        lyrics = sampleLyricsByTrack[current.id] ?: defaultLyricsFor(current),
                     )
                 }
             }
         }
     }
+
+    private fun withController(action: (MediaController) -> Unit) {
+        val ctrl = mediaController
+        if (ctrl != null) {
+            action(ctrl)
+        } else {
+            pendingCommand = action
+        }
+    }
+
+    private fun toMediaItems(tracks: List<Track>): List<MediaItem> =
+        tracks.map { track ->
+            MupaPlaybackService.buildMediaItem(
+                trackId = track.id,
+                title = track.title,
+                artist = track.artistName,
+                albumTitle = track.albumTitle,
+                artworkUrl = track.artworkUrl,
+                localContentUri = if (track.sourceType == AudioSourceType.LOCAL && track.id.startsWith("content://")) {
+                    track.id
+                } else {
+                    null
+                },
+            )
+        }
 
     private fun persistCurrentQueue() {
         val snapshot = _uiState.value
@@ -169,40 +247,66 @@ class MupaPlayerViewModel @Inject constructor(
                 currentTrack = track,
                 positionMs = 0L,
                 durationMs = track.durationMs.coerceAtLeast(1_000L),
-                isPlaying = true,
-                lyrics = sampleLyricsByTrack[track.id] ?: defaultLyricsFor(track),
+                isPlaying = false,
+                isBuffering = true,
+                lyrics = emptyList(),
                 lyricsOffsetMs = 0L,
                 errorMessage = null,
             )
         }
         persistCurrentQueue()
-        startTicker()
+
+        val mediaItems = toMediaItems(tracks)
+        withController { ctrl ->
+            ctrl.setMediaItems(mediaItems, safeIndex, 0L)
+            ctrl.prepare()
+            ctrl.play()
+        }
+        if (_uiState.value.activeOverlay == PlayerOverlayPane.LYRICS) {
+            fetchLyricsForCurrentTrack()
+        }
     }
 
     fun togglePlayPause() {
-        val nextPlaying = !_uiState.value.isPlaying
-        _uiState.update { it.copy(isPlaying = nextPlaying) }
-        if (nextPlaying) startTicker() else stopTicker()
+        val state = _uiState.value
+        val current = state.currentTrack ?: return
+        withController { ctrl ->
+            if (ctrl.mediaItemCount == 0 && state.queue.isNotEmpty()) {
+                // Antrean dipulihkan dari penyimpanan lokal, muat ke ExoPlayer lalu putar
+                _uiState.update { it.copy(isBuffering = true, errorMessage = null) }
+                ctrl.setMediaItems(toMediaItems(state.queue), state.currentIndex, state.positionMs)
+                ctrl.prepare()
+                ctrl.play()
+            } else if (ctrl.isPlaying) {
+                ctrl.pause()
+            } else {
+                if (ctrl.playbackState == Player.STATE_IDLE || ctrl.playbackState == Player.STATE_ENDED) {
+                    _uiState.update { it.copy(isBuffering = true, errorMessage = null) }
+                    ctrl.prepare()
+                }
+                ctrl.play()
+            }
+        }
     }
 
     fun seekTo(positionMs: Long) {
         val dur = _uiState.value.durationMs
-        _uiState.update { it.copy(positionMs = positionMs.coerceIn(0L, dur)) }
+        val clamped = positionMs.coerceIn(0L, dur)
+        _uiState.update { it.copy(positionMs = clamped) }
+        withController { it.seekTo(clamped) }
     }
 
     fun skipNext() {
         val state = _uiState.value
         if (state.queue.isEmpty()) return
-        val nextIndex = when {
-            state.repeatMode == RepeatMode.ONE -> state.currentIndex
-            state.isShuffleEnabled && state.queue.size > 1 -> {
-                (state.queue.indices - state.currentIndex).random()
+        withController { ctrl ->
+            if (ctrl.hasNextMediaItem()) {
+                ctrl.seekToNextMediaItem()
+                ctrl.play()
+            } else if (state.queue.isNotEmpty()) {
+                selectQueueIndex(0, autoPlay = true)
             }
-            state.currentIndex < state.queue.lastIndex -> state.currentIndex + 1
-            state.repeatMode == RepeatMode.ALL -> 0
-            else -> 0
         }
-        selectQueueIndex(nextIndex, autoPlay = state.isPlaying)
     }
 
     fun skipPrevious() {
@@ -212,8 +316,14 @@ class MupaPlayerViewModel @Inject constructor(
             seekTo(0L)
             return
         }
-        val prevIndex = if (state.currentIndex > 0) state.currentIndex - 1 else state.queue.lastIndex
-        selectQueueIndex(prevIndex, autoPlay = state.isPlaying)
+        withController { ctrl ->
+            if (ctrl.hasPreviousMediaItem()) {
+                ctrl.seekToPreviousMediaItem()
+                ctrl.play()
+            } else {
+                selectQueueIndex(state.queue.lastIndex, autoPlay = true)
+            }
+        }
     }
 
     fun selectQueueIndex(index: Int, autoPlay: Boolean = true) {
@@ -226,26 +336,43 @@ class MupaPlayerViewModel @Inject constructor(
                 currentTrack = track,
                 positionMs = 0L,
                 durationMs = track.durationMs.coerceAtLeast(1_000L),
-                isPlaying = autoPlay,
-                lyrics = sampleLyricsByTrack[track.id] ?: defaultLyricsFor(track),
+                isBuffering = autoPlay,
+                lyrics = emptyList(),
                 lyricsOffsetMs = 0L,
+                errorMessage = null,
             )
         }
-        if (autoPlay) startTicker() else stopTicker()
+        withController { ctrl ->
+            if (ctrl.mediaItemCount != state.queue.size) {
+                ctrl.setMediaItems(toMediaItems(state.queue), index, 0L)
+                ctrl.prepare()
+            } else {
+                ctrl.seekTo(index, 0L)
+            }
+            if (autoPlay) ctrl.play() else ctrl.pause()
+        }
+        persistCurrentQueue()
     }
 
     fun toggleShuffle() {
-        _uiState.update { it.copy(isShuffleEnabled = !it.isShuffleEnabled) }
+        val next = !_uiState.value.isShuffleEnabled
+        _uiState.update { it.copy(isShuffleEnabled = next) }
+        withController { it.shuffleModeEnabled = next }
     }
 
     fun cycleRepeatMode() {
-        _uiState.update { state ->
-            val next = when (state.repeatMode) {
-                RepeatMode.OFF -> RepeatMode.ALL
-                RepeatMode.ALL -> RepeatMode.ONE
-                RepeatMode.ONE -> RepeatMode.OFF
+        val next = when (_uiState.value.repeatMode) {
+            RepeatMode.OFF -> RepeatMode.ALL
+            RepeatMode.ALL -> RepeatMode.ONE
+            RepeatMode.ONE -> RepeatMode.OFF
+        }
+        _uiState.update { it.copy(repeatMode = next) }
+        withController { ctrl ->
+            ctrl.repeatMode = when (next) {
+                RepeatMode.OFF -> Player.REPEAT_MODE_OFF
+                RepeatMode.ALL -> Player.REPEAT_MODE_ALL
+                RepeatMode.ONE -> Player.REPEAT_MODE_ONE
             }
-            state.copy(repeatMode = next)
         }
     }
 
@@ -336,6 +463,12 @@ class MupaPlayerViewModel @Inject constructor(
             val newCurrentIndex = mutable.indexOfFirst { it.id == currentId }.coerceAtLeast(0)
             state.copy(queue = mutable, currentIndex = newCurrentIndex)
         }
+        withController { ctrl ->
+            if (fromIndex in 0 until ctrl.mediaItemCount && toIndex in 0 until ctrl.mediaItemCount) {
+                ctrl.moveMediaItem(fromIndex, toIndex)
+            }
+        }
+        persistCurrentQueue()
     }
 
     fun removeQueueItem(index: Int) {
@@ -356,39 +489,44 @@ class MupaPlayerViewModel @Inject constructor(
                 durationMs = nextTrack.durationMs.coerceAtLeast(1_000L),
             )
         }
+        withController { ctrl ->
+            if (index in 0 until ctrl.mediaItemCount && ctrl.mediaItemCount > 1) {
+                ctrl.removeMediaItem(index)
+            }
+        }
+        persistCurrentQueue()
     }
 
-    private fun startTicker() {
-        if (tickerJob?.isActive == true) return
-        tickerJob = viewModelScope.launch {
+    private fun startPositionSync() {
+        if (positionSyncJob?.isActive == true) return
+        positionSyncJob = viewModelScope.launch {
             while (true) {
-                delay(100L)
-                val state = _uiState.value
-                if (!state.isPlaying) break
-                val nextPos = state.positionMs + 100L
-                if (nextPos >= state.durationMs && state.durationMs > 0L) {
-                    skipNext()
-                } else {
-                    _uiState.update { it.copy(positionMs = nextPos) }
+                val ctrl = mediaController
+                if (ctrl == null || !ctrl.isPlaying) break
+                val pos = ctrl.currentPosition.coerceAtLeast(0L)
+                val dur = ctrl.duration.takeIf { it > 0L }
+                _uiState.update { state ->
+                    state.copy(
+                        positionMs = pos,
+                        durationMs = dur ?: state.durationMs,
+                    )
                 }
+                delay(200L)
             }
         }
     }
 
-    private fun stopTicker() {
-        tickerJob?.cancel()
-        tickerJob = null
+    private fun stopPositionSync() {
+        positionSyncJob?.cancel()
+        positionSyncJob = null
     }
 
-    private fun defaultLyricsFor(track: Track): List<LyricsLine> = listOf(
-        LyricsLine(0L, 4_500L, track.title),
-        LyricsLine(4_500L, 9_500L, "Dibawakan oleh ${track.artistName}"),
-        LyricsLine(9_500L, 15_000L, "Pratinjau lirik tersinkron dengan wipe warna adaptif"),
-        LyricsLine(15_000L, 21_000L, "Ketuk baris mana saja untuk melompat ke waktu tersebut"),
-    )
-
     override fun onCleared() {
-        stopTicker()
+        stopPositionSync()
+        mediaController?.removeListener(playerListener)
+        controllerFuture?.let { MediaController.releaseFuture(it) }
+        mediaController = null
+        controllerFuture = null
         super.onCleared()
     }
 }

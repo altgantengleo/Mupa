@@ -18,6 +18,12 @@ data class InnerTubeClientProfile(
     val userAgent: String,
     val osName: String? = null,
     val osVersion: String? = null,
+    val deviceMake: String? = null,
+    val deviceModel: String? = null,
+    val androidSdkVersion: Int? = null,
+    val clientScreen: String? = null,
+    val apiFormatVersion: String? = null,
+    val ownVisitorId: Boolean = false,
     val platform: String = "MOBILE",
 ) {
     fun buildContextJson(
@@ -33,6 +39,10 @@ data class InnerTubeClientProfile(
             put("platform", platform)
             osName?.let { put("osName", it) }
             osVersion?.let { put("osVersion", it) }
+            deviceMake?.let { put("deviceMake", it) }
+            deviceModel?.let { put("deviceModel", it) }
+            androidSdkVersion?.let { put("androidSdkVersion", it) }
+            clientScreen?.let { put("clientScreen", it) }
             if (!visitorData.isNullOrBlank()) {
                 put("visitorData", visitorData)
             }
@@ -48,10 +58,27 @@ object InnerTubeProfiles {
         id = "web_remix",
         clientName = "WEB_REMIX",
         clientNameHeaderId = "67",
-        clientVersion = "1.20250401.01.00",
+        clientVersion = "1.20260707.12.00",
         apiOrigin = YTM_ORIGIN,
-        userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:136.0) Gecko/20100101 Firefox/136.0",
+        userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/135.0.0.0 Safari/537.36",
         platform = "DESKTOP",
+    )
+
+    val VISIONOS = InnerTubeClientProfile(
+        id = "visionos",
+        clientName = "VISIONOS",
+        clientNameHeaderId = "101",
+        clientVersion = "1.04",
+        apiOrigin = YT_ORIGIN,
+        userAgent = "com.google.visionos.youtube/1.04(RealityDevice17,1; U; CPU visionOS 26_6_0 like Mac OS X; US)",
+        osName = "visionOS",
+        osVersion = "26.6.0.23O770",
+        deviceMake = "Apple",
+        deviceModel = "RealityDevice17,1",
+        clientScreen = "WATCH",
+        apiFormatVersion = "2",
+        ownVisitorId = true,
+        platform = "MOBILE",
     )
 
     val ANDROID_VR = InnerTubeClientProfile(
@@ -60,9 +87,13 @@ object InnerTubeProfiles {
         clientNameHeaderId = "28",
         clientVersion = "1.61.48",
         apiOrigin = YT_ORIGIN,
-        userAgent = "com.google.android.apps.youtube.vr.oculus/1.61.48 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip",
+        userAgent = "com.google.android.apps.youtube.vr.oculus/1.61.48 (Linux; U; Android 12; en_US; Oculus Quest 3; Build/SQ3A.220605.009.A1; Cronet/132.0.6808.3)",
         osName = "Android",
-        osVersion = "12L",
+        osVersion = "12",
+        deviceMake = "Oculus",
+        deviceModel = "Quest 3",
+        androidSdkVersion = 32,
+        ownVisitorId = true,
         platform = "MOBILE",
     )
 
@@ -70,13 +101,14 @@ object InnerTubeProfiles {
         id = "ios",
         clientName = "IOS",
         clientNameHeaderId = "5",
-        clientVersion = "20.10.4",
+        clientVersion = "21.03.1",
         apiOrigin = YT_ORIGIN,
-        userAgent = "com.google.ios.youtube/20.10.4 (iPhone16,2; U; CPU iOS 18_2 like Mac OS X)",
+        userAgent = "com.google.ios.youtube/21.03.1 (iPhone16,2; U; CPU iOS 18_2 like Mac OS X;)",
         osName = "iOS",
-        osVersion = "18.2.0",
+        osVersion = "18.2.22C152",
+        ownVisitorId = true,
         platform = "MOBILE",
     )
 
-    val STREAM_WALK_ORDER: List<InnerTubeClientProfile> = listOf(ANDROID_VR, IOS, WEB_REMIX)
+    val STREAM_WALK_ORDER: List<InnerTubeClientProfile> = listOf(VISIONOS, ANDROID_VR, IOS, WEB_REMIX)
 }

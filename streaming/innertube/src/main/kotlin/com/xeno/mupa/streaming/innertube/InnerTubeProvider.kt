@@ -23,12 +23,14 @@ import org.schabi.newpipe.extractor.downloader.Request as NpRequest
 import org.schabi.newpipe.extractor.downloader.Response as NpResponse
 import org.schabi.newpipe.extractor.stream.StreamInfo
 import java.io.IOException
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * Klien InnerTube Mupa (guest mode, tanpa login/cookie).
- * Mengisolasi seluruh detail YouTube + fallback NewPipeExtractor di dalam modul :streaming:innertube.
+ * - Mendukung visitorData otomatis untuk VISIONOS / ANDROID_VR / IOS.
+ * - Mengisolasi seluruh detail YouTube + fallback NewPipeExtractor di dalam modul :streaming:innertube.
  */
 class InnerTubeProvider(
     private val httpClient: OkHttpClient = defaultHttpClient(),
@@ -38,14 +40,66 @@ class InnerTubeProvider(
     override val priority: Int = 10
     override val supportsDirectTrackId: Boolean = true
 
-    override suspend fun searchTracks(query: String, limit: Int): Result<List<Track>> =
+    private data class CachedVisitor(val visitorData: String, val expiresAtMs: Long)
+
+    private val visitorCache = ConcurrentHashMap<String, CachedVisitor>()
+
+    suspend fun getTrendingArtists(limit: Int = 24): Result<List<Artist>> =
         withContext(Dispatchers.IO) {
             val bodyJson = buildJsonObject {
                 put("context", InnerTubeProfiles.WEB_REMIX.buildContextJson())
-                put("query", query)
-                put("params", "EgWKAQIIAWoKEAkQBRAKEAMQBA%3D%3D") // Songs filter
+                put("browseId", "FEmusic_charts")
             }
-            postInnerTube(InnerTubeProfiles.WEB_REMIX, "search", bodyJson.toString())
+            val fromCharts = postInnerTube(InnerTubeProfiles.WEB_REMIX, "browse", bodyJson.toString())
+                .fold(
+                    onSuccess = { InnerTubeParser.parseSearchArtists(it, limit).getOrDefault(emptyList()) },
+                    onFailure = { emptyList() },
+                )
+                .filter { !it.artworkUrl.isNullOrBlank() }
+
+            if (fromCharts.size >= 8) {
+                return@withContext Result.success(fromCharts.distinctBy { it.id }.take(limit))
+            }
+
+            // Tambah dari pencarian umum agar daftar awal selalu kaya & berfoto HD
+            val seedQueries = listOf("Indonesia Pop", "Indie Indonesia", "Global Top Artists")
+            val combined = fromCharts.toMutableList()
+            for (q in seedQueries) {
+                if (combined.size >= limit) break
+                val extra = searchArtists(q, limit = 10).getOrDefault(emptyList())
+                combined.addAll(extra)
+            }
+            val unique = combined.distinctBy { it.name.lowercase() }.take(limit)
+            if (unique.isNotEmpty()) {
+                Result.success(unique)
+            } else {
+                Result.failure(StreamingError.Network("Gagal memuat artis populer dari YouTube Music"))
+            }
+        }
+
+    override suspend fun searchTracks(query: String, limit: Int): Result<List<Track>> =
+        withContext(Dispatchers.IO) {
+            val withFilter = buildJsonObject {
+                put("context", InnerTubeProfiles.WEB_REMIX.buildContextJson())
+                put("query", query)
+                put("params", SONGS_FILTER_PARAMS)
+            }
+            val primary = postInnerTube(InnerTubeProfiles.WEB_REMIX, "search", withFilter.toString())
+                .fold(
+                    onSuccess = { InnerTubeParser.parseSearchTracks(it, limit) },
+                    onFailure = { Result.failure(it) },
+                )
+            val tracks = primary.getOrDefault(emptyList())
+            if (tracks.isNotEmpty()) {
+                return@withContext Result.success(tracks)
+            }
+
+            // Fallback tanpa filter params bila YouTube mengubah token filter
+            val plainBody = buildJsonObject {
+                put("context", InnerTubeProfiles.WEB_REMIX.buildContextJson())
+                put("query", query)
+            }
+            postInnerTube(InnerTubeProfiles.WEB_REMIX, "search", plainBody.toString())
                 .fold(
                     onSuccess = { InnerTubeParser.parseSearchTracks(it, limit) },
                     onFailure = { Result.failure(it) },
@@ -54,12 +108,26 @@ class InnerTubeProvider(
 
     override suspend fun searchArtists(query: String, limit: Int): Result<List<Artist>> =
         withContext(Dispatchers.IO) {
-            val bodyJson = buildJsonObject {
+            val withFilter = buildJsonObject {
                 put("context", InnerTubeProfiles.WEB_REMIX.buildContextJson())
                 put("query", query)
-                put("params", "EgWKAQIgAWoKEAkQBRAKEAMQBA%3D%3D") // Artists filter
+                put("params", ARTISTS_FILTER_PARAMS)
             }
-            postInnerTube(InnerTubeProfiles.WEB_REMIX, "search", bodyJson.toString())
+            val primary = postInnerTube(InnerTubeProfiles.WEB_REMIX, "search", withFilter.toString())
+                .fold(
+                    onSuccess = { InnerTubeParser.parseSearchArtists(it, limit) },
+                    onFailure = { Result.failure(it) },
+                )
+            val artists = primary.getOrDefault(emptyList())
+            if (artists.isNotEmpty()) {
+                return@withContext Result.success(artists)
+            }
+
+            val plainBody = buildJsonObject {
+                put("context", InnerTubeProfiles.WEB_REMIX.buildContextJson())
+                put("query", query)
+            }
+            postInnerTube(InnerTubeProfiles.WEB_REMIX, "search", plainBody.toString())
                 .fold(
                     onSuccess = { InnerTubeParser.parseSearchArtists(it, limit) },
                     onFailure = { Result.failure(it) },
@@ -76,27 +144,41 @@ class InnerTubeProvider(
             } else {
                 searchTracks("${request.artistName} ${request.title}", limit = 1)
                     .getOrNull()?.firstOrNull()?.id
-                    ?: return@withContext Result.failure(StreamingError.Unavailable("VideoId InnerTube tidak ditemukan"))
+                    ?: return@withContext Result.failure(
+                        StreamingError.Unavailable("VideoId InnerTube tidak ditemukan untuk ${request.title}"),
+                    )
             }
 
             var lastError: Throwable = StreamingError.Unavailable("Semua klien InnerTube gagal")
             for (profile in InnerTubeProfiles.STREAM_WALK_ORDER) {
+                val visitorData = if (profile.ownVisitorId) getOrFetchVisitorData(profile) else null
                 val payload = buildJsonObject {
-                    put("context", profile.buildContextJson())
+                    put("context", profile.buildContextJson(visitorData = visitorData))
                     put("videoId", videoId)
                     put("contentCheckOk", true)
                     put("racyCheckOk", true)
                 }
-                val raw = postInnerTube(profile, "player", payload.toString())
+                val streamHeaders = mapOf("User-Agent" to profile.userAgent)
+                val raw = postInnerTube(profile, "player", payload.toString(), visitorData = visitorData)
                 val parsed = raw.fold(
-                    onSuccess = { InnerTubeParser.parsePlayerResponse(it, request.quality) },
+                    onSuccess = {
+                        InnerTubeParser.parsePlayerResponse(
+                            rawJson = it,
+                            quality = request.quality,
+                            requestHeaders = streamHeaders,
+                        )
+                    },
                     onFailure = { Result.failure(it) },
                 )
                 val resolved = parsed.getOrNull()?.stream
                 if (resolved != null) {
                     return@withContext Result.success(resolved)
                 }
-                parsed.exceptionOrNull()?.let { lastError = it }
+                val err = parsed.exceptionOrNull()
+                if (err is StreamingError.BotCheck && profile.ownVisitorId) {
+                    visitorCache.remove(profile.id)
+                }
+                if (err != null) lastError = err
             }
 
             // Fallback terisolasi ke NewPipeExtractor (untuk stream bersignature/n-param)
@@ -105,6 +187,21 @@ class InnerTubeProvider(
                 onFailure = { npErr -> Result.failure(if (lastError is StreamingError) lastError else npErr) },
             )
         }
+
+    private fun getOrFetchVisitorData(profile: InnerTubeClientProfile): String? {
+        val now = System.currentTimeMillis()
+        val cached = visitorCache[profile.id]
+        if (cached != null && now < cached.expiresAtMs) {
+            return cached.visitorData
+        }
+        val body = buildJsonObject {
+            put("context", profile.buildContextJson())
+        }
+        val raw = postInnerTube(profile, "visitor_id", body.toString()).getOrNull() ?: return null
+        val vd = InnerTubeParser.extractVisitorData(raw)?.takeIf { it.isNotBlank() } ?: return null
+        visitorCache[profile.id] = CachedVisitor(vd, now + TimeUnit.MINUTES.toMillis(30))
+        return vd
+    }
 
     private fun resolveWithNewPipe(
         videoId: String,
@@ -140,9 +237,10 @@ class InnerTubeProvider(
         profile: InnerTubeClientProfile,
         endpoint: String,
         jsonBody: String,
+        visitorData: String? = null,
     ): Result<String> {
         val url = "${profile.apiOrigin}/youtubei/v1/$endpoint?prettyPrint=false"
-        val request = Request.Builder()
+        val reqBuilder = Request.Builder()
             .url(url)
             .header("User-Agent", profile.userAgent)
             .header("X-YouTube-Client-Name", profile.clientNameHeaderId)
@@ -150,10 +248,14 @@ class InnerTubeProvider(
             .header("Origin", profile.apiOrigin)
             .header("Referer", "${profile.apiOrigin}/")
             .post(jsonBody.toRequestBody(JSON_MEDIA_TYPE))
-            .build()
+
+        profile.apiFormatVersion?.let { reqBuilder.header("X-YouTube-Api-Format-Version", it) }
+        if (!visitorData.isNullOrBlank()) {
+            reqBuilder.header("X-Goog-Visitor-Id", visitorData)
+        }
 
         return try {
-            httpClient.newCall(request).execute().use { response ->
+            httpClient.newCall(reqBuilder.build()).execute().use { response ->
                 val text = response.body?.string().orEmpty()
                 when (response.code) {
                     in 200..299 -> Result.success(text)
@@ -173,6 +275,8 @@ class InnerTubeProvider(
 
     companion object {
         private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
+        private const val SONGS_FILTER_PARAMS = "EgWKAQIIAWoKEAkQBRAKEAMQBA=="
+        private const val ARTISTS_FILTER_PARAMS = "EgWKAQIgAWoKEAkQBRAKEAMQBA=="
         private val newPipeReady = AtomicBoolean(false)
 
         fun isLikelyYouTubeVideoId(id: String): Boolean =

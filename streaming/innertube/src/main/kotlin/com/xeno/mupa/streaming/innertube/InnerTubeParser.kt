@@ -19,7 +19,8 @@ import kotlinx.serialization.json.longOrNull
 
 /**
  * Parser JSON InnerTube yang toleran dan defensif (nol !! assertion).
- * Memetakan respons /search dan /player menjadi model domain Mupa murni.
+ * Memetakan respons /search, /browse, dan /player menjadi model domain Mupa murni
+ * dengan upscaling thumbnail HD untuk cover art & potret artis.
  */
 object InnerTubeParser {
 
@@ -29,6 +30,9 @@ object InnerTubeParser {
         coerceInputValues = true
     }
 
+    private val googleSizeRegex = Regex("""=w\d+-h\d+[^&"]*""")
+    private val googleSquareRegex = Regex("""=s\d+[^&"]*""")
+
     data class ParsedPlayerStream(
         val stream: ResolvedStream?,
         val playabilityStatus: String,
@@ -36,10 +40,16 @@ object InnerTubeParser {
         val hasCipheredAudioOnly: Boolean,
     )
 
+    fun extractVisitorData(rawJson: String): String? = runCatching {
+        val root = tolerantJson.parseToJsonElement(rawJson).jsonObject
+        root["responseContext"]?.asObjectOrNull()?.get("visitorData")?.asStringOrNull()
+    }.getOrNull()
+
     fun parsePlayerResponse(
         rawJson: String,
         quality: AudioQualityPreference = AudioQualityPreference.HIGH,
         nowEpochMs: Long = System.currentTimeMillis(),
+        requestHeaders: Map<String, String> = emptyMap(),
     ): Result<ParsedPlayerStream> {
         val root = runCatching { tolerantJson.parseToJsonElement(rawJson).jsonObject }
             .getOrElse { return Result.failure(StreamingError.ParseError("JSON player tidak valid", it)) }
@@ -51,7 +61,11 @@ object InnerTubeParser {
         if (status != "OK") {
             val lowerReason = reason.orEmpty().lowercase()
             val error = when {
-                status == "LOGIN_REQUIRED" && (lowerReason.contains("bot") || lowerReason.contains("confirm")) ->
+                status == "LOGIN_REQUIRED" && (
+                    lowerReason.contains("bot") ||
+                        lowerReason.contains("confirm") ||
+                        lowerReason.contains("konfirmasi")
+                    ) ->
                     StreamingError.BotCheck(reason ?: "Verifikasi bot YouTube")
                 lowerReason.contains("country") || lowerReason.contains("region") || lowerReason.contains("geo") ->
                     StreamingError.GeoBlocked(reason ?: "Konten dibatasi wilayah")
@@ -109,6 +123,7 @@ object InnerTubeParser {
                     mimeType = picked.second,
                     bitrateKbps = picked.third / 1000,
                     expiresAtEpochMs = nowEpochMs + (expiresSec * 1_000L),
+                    headers = requestHeaders,
                 ),
                 playabilityStatus = status,
                 reason = reason,
@@ -122,11 +137,11 @@ object InnerTubeParser {
             .getOrElse { return Result.failure(StreamingError.ParseError("JSON pencarian tidak valid", it)) }
 
         val collected = mutableListOf<Track>()
-        collectResponsiveItems(root, collected, limit)
+        collectTrackItems(root, collected, limit)
         return Result.success(collected.distinctBy { it.id }.take(limit))
     }
 
-    fun parseSearchArtists(rawJson: String, limit: Int = 16): Result<List<Artist>> {
+    fun parseSearchArtists(rawJson: String, limit: Int = 24): Result<List<Artist>> {
         val root = runCatching { tolerantJson.parseToJsonElement(rawJson).jsonObject }
             .getOrElse { return Result.failure(StreamingError.ParseError("JSON artis tidak valid", it)) }
 
@@ -135,32 +150,46 @@ object InnerTubeParser {
         return Result.success(artists.distinctBy { it.id }.take(limit))
     }
 
+    internal fun upscaleArtworkUrl(rawUrl: String?): String? {
+        val url = rawUrl?.trim()?.takeIf { it.startsWith("http") } ?: return null
+        if (!url.contains("googleusercontent.com") && !url.contains("ggpht.com")) {
+            return url
+        }
+        return when {
+            googleSizeRegex.containsMatchIn(url) -> googleSizeRegex.replace(url, "=w544-h544-p-l90-rj")
+            googleSquareRegex.containsMatchIn(url) -> googleSquareRegex.replace(url, "=s544-c-k-c0x00ffffff-no-rj")
+            else -> url
+        }
+    }
+
     private fun scoreFormat(mime: String, bitrate: Int): Long {
         val codecBonus = when {
+            mime.contains("mp4", ignoreCase = true) -> 15_000L
             mime.contains("webm", ignoreCase = true) || mime.contains("opus", ignoreCase = true) -> 20_000L
-            mime.contains("mp4", ignoreCase = true) -> 10_000L
             else -> 0L
         }
         return bitrate.toLong() + codecBonus
     }
 
-    private fun collectResponsiveItems(node: JsonElement, out: MutableList<Track>, limit: Int) {
+    private fun collectTrackItems(node: JsonElement, out: MutableList<Track>, limit: Int) {
         if (out.size >= limit) return
         when (node) {
             is JsonObject -> {
-                val renderer = node["musicResponsiveListItemRenderer"]?.asObjectOrNull()
-                if (renderer != null) {
+                node["musicResponsiveListItemRenderer"]?.asObjectOrNull()?.let { renderer ->
                     parseTrackRenderer(renderer)?.let { out.add(it) }
+                }
+                node["musicTwoRowItemRenderer"]?.asObjectOrNull()?.let { renderer ->
+                    parseTwoRowTrackRenderer(renderer)?.let { out.add(it) }
                 }
                 for (value in node.values) {
                     if (out.size >= limit) break
-                    collectResponsiveItems(value, out, limit)
+                    collectTrackItems(value, out, limit)
                 }
             }
             is JsonArray -> {
                 for (item in node) {
                     if (out.size >= limit) break
-                    collectResponsiveItems(item, out, limit)
+                    collectTrackItems(item, out, limit)
                 }
             }
             else -> Unit
@@ -171,6 +200,7 @@ object InnerTubeParser {
         val videoId = renderer["playlistItemData"]?.asObjectOrNull()?.get("videoId")?.asStringOrNull()
             ?: findNestedString(renderer, "videoId")
             ?: return null
+        if (!InnerTubeProvider.isLikelyYouTubeVideoId(videoId)) return null
 
         val flexColumns = renderer["flexColumns"]?.asArrayOrNull().orEmpty()
         val title = flexColumns.getOrNull(0)?.let { extractRunsText(it) }?.takeIf { it.isNotBlank() }
@@ -178,11 +208,20 @@ object InnerTubeParser {
         val subtitleRuns = flexColumns.getOrNull(1)?.let { extractRunsList(it) }.orEmpty()
             .filter { it != " • " && it != "•" && it.isNotBlank() }
 
-        val artist = subtitleRuns.firstOrNull { !isDurationToken(it) && !it.equals("Song", true) && !it.equals("Lagu", true) }
-            ?: "Artis Tidak Diketahui"
+        val artist = subtitleRuns.firstOrNull {
+            !isDurationToken(it) &&
+                !it.equals("Song", true) &&
+                !it.equals("Lagu", true) &&
+                !it.equals("Video", true) &&
+                !it.contains("views", true) &&
+                !it.contains("ditonton", true) &&
+                !it.contains("plays", true) &&
+                !it.contains("kali diputar", true)
+        } ?: "Artis Tidak Diketahui"
         val durationToken = subtitleRuns.lastOrNull { isDurationToken(it) }
         val durationMs = durationToken?.let { parseDurationTokenMs(it) } ?: 0L
-        val thumbnailUrl = extractBestThumbnail(renderer)
+        val thumbnailUrl = upscaleArtworkUrl(extractBestThumbnail(renderer))
+            ?: "https://i.ytimg.com/vi/$videoId/hqdefault.jpg"
 
         return Track(
             id = videoId,
@@ -194,12 +233,37 @@ object InnerTubeParser {
         )
     }
 
+    private fun parseTwoRowTrackRenderer(renderer: JsonObject): Track? {
+        val videoId = renderer["navigationEndpoint"]?.asObjectOrNull()
+            ?.get("watchEndpoint")?.asObjectOrNull()
+            ?.get("videoId")?.asStringOrNull()
+            ?: return null
+        if (!InnerTubeProvider.isLikelyYouTubeVideoId(videoId)) return null
+
+        val title = renderer["title"]?.let { extractRunsText(it) }?.takeIf { it.isNotBlank() }
+            ?: return null
+        val subtitleRuns = renderer["subtitle"]?.let { extractRunsList(it) }.orEmpty()
+            .filter { it != " • " && it != "•" && it.isNotBlank() }
+        val artist = subtitleRuns.firstOrNull {
+            !it.equals("Song", true) && !it.equals("Lagu", true) && !it.equals("Video", true)
+        } ?: "Artis Tidak Diketahui"
+        val thumbnailUrl = upscaleArtworkUrl(extractBestThumbnail(renderer))
+            ?: "https://i.ytimg.com/vi/$videoId/hqdefault.jpg"
+
+        return Track(
+            id = videoId,
+            title = title,
+            artistName = artist,
+            artworkUrl = thumbnailUrl,
+            sourceType = AudioSourceType.STREAMING,
+        )
+    }
+
     private fun collectArtistItems(node: JsonElement, out: MutableList<Artist>, limit: Int) {
         if (out.size >= limit) return
         when (node) {
             is JsonObject -> {
-                val renderer = node["musicResponsiveListItemRenderer"]?.asObjectOrNull()
-                if (renderer != null) {
+                node["musicResponsiveListItemRenderer"]?.asObjectOrNull()?.let { renderer ->
                     val browseId = renderer["navigationEndpoint"]?.asObjectOrNull()
                         ?.get("browseEndpoint")?.asObjectOrNull()
                         ?.get("browseId")?.asStringOrNull()
@@ -207,12 +271,32 @@ object InnerTubeParser {
                         val name = renderer["flexColumns"]?.asArrayOrNull()
                             ?.getOrNull(0)?.let { extractRunsText(it) }
                             ?.takeIf { it.isNotBlank() }
+                        val thumb = upscaleArtworkUrl(extractBestThumbnail(renderer))
                         if (name != null) {
                             out.add(
                                 Artist(
                                     id = browseId,
                                     name = name,
-                                    artworkUrl = extractBestThumbnail(renderer),
+                                    artworkUrl = thumb,
+                                    sourceType = AudioSourceType.STREAMING,
+                                ),
+                            )
+                        }
+                    }
+                }
+                node["musicTwoRowItemRenderer"]?.asObjectOrNull()?.let { renderer ->
+                    val browseId = renderer["navigationEndpoint"]?.asObjectOrNull()
+                        ?.get("browseEndpoint")?.asObjectOrNull()
+                        ?.get("browseId")?.asStringOrNull()
+                    if (browseId != null && browseId.startsWith("UC")) {
+                        val name = renderer["title"]?.let { extractRunsText(it) }?.takeIf { it.isNotBlank() }
+                        val thumb = upscaleArtworkUrl(extractBestThumbnail(renderer))
+                        if (name != null) {
+                            out.add(
+                                Artist(
+                                    id = browseId,
+                                    name = name,
+                                    artworkUrl = thumb,
                                     sourceType = AudioSourceType.STREAMING,
                                 ),
                             )
@@ -255,8 +339,10 @@ object InnerTubeParser {
     }
 
     private fun extractBestThumbnail(renderer: JsonObject): String? {
-        val thumbs = renderer["thumbnail"]?.asObjectOrNull()
-            ?.get("musicThumbnailRenderer")?.asObjectOrNull()
+        val thumbHolder = renderer["thumbnail"]?.asObjectOrNull()
+            ?: renderer["thumbnailRenderer"]?.asObjectOrNull()
+            ?: return null
+        val thumbs = thumbHolder["musicThumbnailRenderer"]?.asObjectOrNull()
             ?.get("thumbnail")?.asObjectOrNull()
             ?.get("thumbnails")?.asArrayOrNull()
             ?: return null

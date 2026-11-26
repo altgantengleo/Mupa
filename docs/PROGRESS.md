@@ -61,4 +61,6 @@
 - **2026-11-26:** Tahap 2 selesai (`c2e93da`).
 - **2026-11-26:** Tahap 3 selesai (`2dcd190`).
 - **2026-11-26:** Tahap 4 selesai (`e21d090`).
-- **2026-11-26:** Tahap 5 selesai — 30/30 unit test lulus, lint 0 error, `assembleRelease` R8 lulus (2.89 MB), `docs/TEST-DEVICE.md` siap.
+- **2026-11-26:** Tahap 5 selesai (`437105a`) — 30/30 unit test lulus, lint 0 error, `assembleRelease` R8 lulus (2.89 MB), `docs/TEST-DEVICE.md` siap.
+- **2026-11-26:** CI Run #1 (`altgantengleo/Mupa`) 100% hijau termasuk `cargo test` & `cargo-ndk` Rust (`arm64-v8a` & `x86_64`).
+- **2026-11-26:** Perbaikan uji perangkat nyata v1.0.0: InnerTube `VISIONOS` + `visitor_id` otomatis (terverifikasi HTTP 206 audio), `MupaPlayerViewModel` terhubung langsung ke Media3 `MediaController` / `MupaPlaybackService`, artwork HD Coil 3 di Onboarding & seluruh kartu/player, opening editorial dark-sheet 2 langkah, `versionCode=1` / `versionName="1.0.0"`, ABI split `arm64-v8a`, dan publikasi otomatis ke GitHub Releases. 31/31 unit test lulus, lint 0 error, brand grep 0 temuan.

@@ -5,6 +5,7 @@ import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MediaMetadata
 import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DataSpec
@@ -178,16 +179,27 @@ class MupaPlaybackService : MediaLibraryService() {
             trackId: String,
             title: String,
             artist: String,
+            albumTitle: String? = null,
+            artworkUrl: String? = null,
             localContentUri: String? = null,
         ): MediaItem {
-            val targetUri = if (!localContentUri.isNullOrBlank()) {
-                Uri.parse(localContentUri)
-            } else {
-                buildStreamingUri(trackId, title, artist)
+            val targetUri = when {
+                !localContentUri.isNullOrBlank() -> Uri.parse(localContentUri)
+                trackId.startsWith("content://") || trackId.startsWith("file://") -> Uri.parse(trackId)
+                else -> buildStreamingUri(trackId, title, artist)
             }
+            val metadata = MediaMetadata.Builder()
+                .setTitle(title)
+                .setArtist(artist)
+                .apply {
+                    if (!albumTitle.isNullOrBlank()) setAlbumTitle(albumTitle)
+                    if (!artworkUrl.isNullOrBlank()) setArtworkUri(Uri.parse(artworkUrl))
+                }
+                .build()
             return MediaItem.Builder()
                 .setMediaId(trackId)
                 .setUri(targetUri)
+                .setMediaMetadata(metadata)
                 .build()
         }
     }
