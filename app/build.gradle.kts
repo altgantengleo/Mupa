@@ -14,8 +14,8 @@ android {
         applicationId = "com.xeno.mupa"
         minSdk = 26
         targetSdk = 35
-        versionCode = 1
-        versionName = "0.1.0-stage1a"
+        versionCode = 2
+        versionName = "0.2.0-stage2"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -66,6 +66,11 @@ dependencies {
     implementation(project(":core:model"))
     implementation(project(":core:domain"))
     implementation(project(":core:designsystem"))
+    implementation(project(":streaming:api"))
+    implementation(project(":streaming:innertube"))
+    implementation(project(":streaming:jiosaavn"))
+    implementation(project(":streaming:aggregator"))
+    implementation(project(":playback"))
 
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.core.splashscreen)
@@ -76,6 +81,7 @@ dependencies {
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.hilt.navigation.compose)
     implementation(libs.androidx.datastore.preferences)
+    implementation(libs.okhttp)
 
     implementation(libs.hilt.android)
     ksp(libs.hilt.compiler)

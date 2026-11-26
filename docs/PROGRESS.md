@@ -5,8 +5,8 @@
 ---
 
 ## Status Saat Ini
-- **Tahap Aktif:** **Tahap 1C (Beranda, Cari, Pustaka, Akun, Pengaturan, Onboarding Artis Wajib, Fake Repos)** — **SELESAI** · Lanjut ke **Tahap 2 (Streaming)**
-- **Branch Git:** `stage-1a/foundation` (commit terpisah per checkpoint)
+- **Tahap Aktif:** **Tahap 2 (Streaming & Media3 Playback Service)** — **SELESAI** · Lanjut ke **Tahap 3 (Local Mode Rust + UniFFI + Scoped Storage)**
+- **Branch Git:** `stage-1a/foundation` (commit terpisah per tahap)
 - **Lisensi:** **GPL-3.0** (`LICENSE` & `NOTICE` aktif)
 
 ---
@@ -18,8 +18,9 @@
 | **Tahap 0: Audit** | **Selesai** | 100% | Audit Mochy & `music-x-V8_5.html`, 5 dokumen `docs/`. |
 | **Tahap 1A: Fondasi UI/UX** | **Selesai** (`8565704`) | 100% | Multi-modul Gradle, CI, tema Ember Editorial + OLED, ikon/splash, DataStore, navigasi 4 tab, floating bottom nav. |
 | **Tahap 1B: Player, Lirik, Antrean** | **Selesai** (`bfdf8fe`) | 100% | `MupaPlayerSheetState` (1 state progres 0..1 di layout/draw, nol overshoot, anti-kedip), Mini↔Full (tanpa Semi), Lirik wipe adaptif, Antrean + 2-frame pre-mount. |
-| **Tahap 1C: Layar Penuh & Onboarding** | **Selesai** | 100% | Fake repositories, Onboarding Artis wajib (min 2, anjuran 4, maks 8, tanpa lewati, SavedStateHandle, Back keluar app, edit dari Akun), Beranda (Untukmu, Mix Mupa, Ulangi Lagi, Belum Diputar), Cari, Pustaka, Akun, Pengaturan (termasuk Hapus Nama Artis), 12/12 unit test lulus. |
-| **Tahap 2: Streaming** | **Sedang dikerjakan** | 0% | `:streaming:api`, `:streaming:innertube` (+ NewPipeExtractor terisolasi), `:streaming:jiosaavn`, `:streaming:aggregator` (registry+fallback+circuit breaker), `:playback` (Media3 service, MediaSession, 500 MB cache, antrean tersimpan), `docs/STREAMING.md`, fixture tests tanpa jaringan. |
+| **Tahap 1C: Layar Penuh & Onboarding** | **Selesai** (`536f9b7`) | 100% | Fake repositories, Onboarding Artis wajib, Beranda, Cari, Pustaka, Akun, Pengaturan, 12/12 unit test lulus. |
+| **Tahap 2: Streaming** | **Selesai** | 100% | `:streaming:api`, `:streaming:innertube` (toleran + NewPipeExtractor terisolasi), `:streaming:jiosaavn`, `:streaming:aggregator` (registry+fallback+circuit breaker+URL cache thread-safe), `:playback` (`MupaPlaybackService` Media3, MediaSession, `ic_notification`, 500 MB `SimpleCache`, JSON `QueuePersistenceStore`), `docs/STREAMING.md`, 22/22 unit test lulus (offline fixtures), lint 0 error. |
+| **Tahap 3: Rust Local Mode** | **Sedang dikerjakan** | 0% | Workspace Rust `engine/local-rust/` (tag reader via fd/bytes, SQLite DB, rekomendasi Mix Mupa/Ulangi Lagi/Belum Diputar, Hapus Nama Artis non-destruktif, UniFFI), Scoped Storage Kotlin bridge, `cargo-ndk` CI, unit test. |
 | **Tahap 2: Streaming** | Belum mulai | 0% | Klien InnerTube + penyedia fallback terisolasi, Media3 service/session/notifikasi/cache/queue. |
 | **Tahap 3: Rust Local Mode** | Belum mulai | 0% | Crate Rust (import, scan folder, metadata/tag, DB lokal, rekomendasi lokal, Hapus Nama Artis) + UniFFI/JNI + unit test. |
 | **Tahap 4: Integrasi** | Belum mulai | 0% | Gabung streaming + lokal, lirik nyata, EQ nyata, backup/restore, uji stabilitas. |

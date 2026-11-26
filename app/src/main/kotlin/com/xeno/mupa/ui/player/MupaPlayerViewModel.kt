@@ -5,7 +5,9 @@ import androidx.lifecycle.viewModelScope
 import com.xeno.mupa.core.model.AudioSourceType
 import com.xeno.mupa.core.model.LyricsLine
 import com.xeno.mupa.core.model.Track
+import com.xeno.mupa.playback.QueuePersistenceStore
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -16,11 +18,12 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 /**
- * ViewModel player untuk Tahap 1 (simulasi pemutaran in-memory).
- * Di Tahap 2 akan disambungkan ke Media3 MupaPlaybackService tanpa mengubah kontrak UI.
+ * ViewModel player terhubung dengan QueuePersistenceStore (Tahap 2).
  */
 @HiltViewModel
-class MupaPlayerViewModel @Inject constructor() : ViewModel() {
+class MupaPlayerViewModel @Inject constructor(
+    private val queueStore: QueuePersistenceStore,
+) : ViewModel() {
 
     private val sampleTracks: List<Track> = listOf(
         Track(
@@ -105,6 +108,50 @@ class MupaPlayerViewModel @Inject constructor() : ViewModel() {
 
     private var tickerJob: Job? = null
 
+    init {
+        viewModelScope.launch(Dispatchers.IO) {
+            val restored = queueStore.load() ?: return@launch
+            if (restored.items.isNotEmpty()) {
+                val restoredTracks = restored.items.map { item ->
+                    Track(
+                        id = item.id,
+                        title = item.title,
+                        artistName = item.artistName,
+                        albumTitle = item.albumTitle,
+                        durationMs = item.durationMs,
+                        artworkUrl = item.artworkUrl,
+                        sourceType = runCatching { AudioSourceType.valueOf(item.sourceType) }
+                            .getOrDefault(AudioSourceType.STREAMING),
+                    )
+                }
+                val safeIndex = restored.currentIndex.coerceIn(0, restoredTracks.lastIndex)
+                val current = restoredTracks[safeIndex]
+                _uiState.update {
+                    it.copy(
+                        queue = restoredTracks,
+                        currentIndex = safeIndex,
+                        currentTrack = current,
+                        positionMs = restored.positionMs.coerceIn(0L, current.durationMs.coerceAtLeast(1L)),
+                        durationMs = current.durationMs.coerceAtLeast(1_000L),
+                        lyrics = sampleLyricsByTrack[current.id] ?: defaultLyricsFor(current),
+                    )
+                }
+            }
+        }
+    }
+
+    private fun persistCurrentQueue() {
+        val snapshot = _uiState.value
+        if (snapshot.queue.isEmpty()) return
+        viewModelScope.launch(Dispatchers.IO) {
+            queueStore.save(
+                tracks = snapshot.queue,
+                currentIndex = snapshot.currentIndex,
+                positionMs = snapshot.positionMs,
+            )
+        }
+    }
+
     fun playQueue(tracks: List<Track>, startIndex: Int = 0) {
         if (tracks.isEmpty()) return
         val safeIndex = startIndex.coerceIn(0, tracks.lastIndex)
@@ -122,6 +169,7 @@ class MupaPlayerViewModel @Inject constructor() : ViewModel() {
                 errorMessage = null,
             )
         }
+        persistCurrentQueue()
         startTicker()
     }
 
