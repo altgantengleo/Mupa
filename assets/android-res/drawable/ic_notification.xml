@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Small notification icon: white/transparent only (system tints it). Glyph scaled to ~20dp wide. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <group
+        android:pivotX="48"
+        android:pivotY="48"
+        android:scaleX="0.357"
+        android:scaleY="0.357"
+        android:translateX="-36"
+        android:translateY="-36">
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M20 66V42A16 16 0 0 1 48 31.417A16 16 0 0 1 76 42H68A8 8 0 0 0 52 42V66A4 4 0 0 1 44 66V42A8 8 0 0 0 28 42V66A4 4 0 0 1 20 66Z" />
+        <path
+            android:fillColor="#FFFFFFFF"
+            android:pathData="M68 41.5H76V66A4 4 0 0 1 68 66Z" />
+    </group>
+</vector>

@@ -1,0 +1,28 @@
+# Reference sources (never committed or shipped into Mupa)
+Mochy/
+music-x-V*.html
+music-x-*.html
+
+# Local SDK & IDE files
+local.properties
+.idea/
+*.iml
+.gradle/
+**/build/
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Secrets & signing keystores (never commit)
+*.keystore
+*.jks
+*.p12
+*.pem
+secrets.properties
+
+# OS / Editor junk
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
