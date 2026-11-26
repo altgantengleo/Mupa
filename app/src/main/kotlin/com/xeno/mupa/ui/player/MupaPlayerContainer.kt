@@ -445,18 +445,19 @@ fun MiniPlayerBar(
                     )
                 }
 
-                IconButton(
-                    onClick = onTogglePlayPause,
+                Box(
                     modifier = Modifier
                         .size(40.dp)
                         .clip(CircleShape)
-                        .background(MupaPalette.CoralPrimary),
+                        .background(MupaPalette.CoralPrimary)
+                        .clickable(onClick = onTogglePlayPause),
+                    contentAlignment = Alignment.Center,
                 ) {
                     Icon(
                         imageVector = if (isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
                         contentDescription = if (isPlaying) "Jeda" else "Putar",
                         tint = MupaPalette.LogoCharcoal,
-                        modifier = Modifier.size(22.dp),
+                        modifier = Modifier.size(20.dp),
                     )
                 }
 

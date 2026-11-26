@@ -49,9 +49,10 @@ import com.xeno.mupa.core.designsystem.theme.MupaTheme
 import com.xeno.mupa.core.model.GlassStyle
 
 /**
- * Floating Glass Bottom Navigation 4 Tab (Beranda, Cari, Pustaka, Akun).
- * - Indikator pil bergeser halus dengan Emphasized Decelerate (nol overshoot/bounce).
- * - Target sentuh tiap tab >= 48dp, lengkap dengan semantics dan contentDescription.
+ * Floating Bottom Navigation 4 Tab (Beranda, Cari, Pustaka, Akun) bergaya Mupa Calm:
+ * - Tinggi 64dp, permukaan SOLID secara default (+ hairline), indikator aktif koral alpha 14%
+ *   + ikon/label koral; non-aktif krem sekunder.
+ * - Transisi pil Emphasized Decelerate 200ms tanpa spring overshoot.
  */
 @Composable
 fun MupaFloatingBottomBar(
@@ -64,14 +65,14 @@ fun MupaFloatingBottomBar(
     val appearance = LocalMupaAppearance.current
 
     val indicatorColor = if (appearance.isOledMode) {
-        Color.White.copy(alpha = 0.14f)
+        Color.White.copy(alpha = 0.12f)
     } else {
-        MupaPalette.CoralPrimary.copy(alpha = 0.18f)
+        MupaPalette.CoralTint14
     }
     val activeContentColor = if (appearance.isOledMode) {
-        MupaPalette.LogoCream
+        MupaPalette.OledOnSurface
     } else {
-        MupaPalette.CoralBright
+        MupaPalette.CoralPrimary
     }
     val inactiveContentColor = MaterialTheme.colorScheme.onSurfaceVariant
 
@@ -93,7 +94,7 @@ fun MupaFloatingBottomBar(
             val slotWidth = maxWidth / destinations.size
             val indicatorOffsetX by animateDpAsState(
                 targetValue = slotWidth * selectedIndex,
-                animationSpec = MupaMotion.emphasizedTween(MupaMotion.DurationMediumMs),
+                animationSpec = MupaMotion.emphasizedTween(MupaMotion.DurationShortMs),
                 label = "bottomNavIndicatorOffset",
             )
 
@@ -163,10 +164,10 @@ fun MupaFloatingBottomBar(
     }
 }
 
-@Preview(name = "Floating Bottom Bar — Liquid+", showBackground = true, backgroundColor = 0xFF0E0E11)
+@Preview(name = "Bottom Bar — Solid Default", showBackground = true, backgroundColor = 0xFF16161A)
 @Composable
-private fun MupaFloatingBottomBarLiquidPreview() {
-    MupaTheme(appearance = MupaAppearance(glassStyle = GlassStyle.LIQUID_PLUS)) {
+private fun MupaFloatingBottomBarSolidPreview() {
+    MupaTheme(appearance = MupaAppearance(glassStyle = GlassStyle.SOLID)) {
         Box(modifier = Modifier.padding(16.dp)) {
             MupaFloatingBottomBar(
                 currentDestination = MupaTopLevelDestination.HOME,
@@ -176,20 +177,7 @@ private fun MupaFloatingBottomBarLiquidPreview() {
     }
 }
 
-@Preview(name = "Floating Bottom Bar — Crystal", showBackground = true, backgroundColor = 0xFF0E0E11)
-@Composable
-private fun MupaFloatingBottomBarCrystalPreview() {
-    MupaTheme(appearance = MupaAppearance(glassStyle = GlassStyle.CRYSTAL)) {
-        Box(modifier = Modifier.padding(16.dp)) {
-            MupaFloatingBottomBar(
-                currentDestination = MupaTopLevelDestination.LIBRARY,
-                onSelectDestination = {},
-            )
-        }
-    }
-}
-
-@Preview(name = "Floating Bottom Bar — OLED", showBackground = true, backgroundColor = 0xFF000000)
+@Preview(name = "Bottom Bar — OLED", showBackground = true, backgroundColor = 0xFF000000)
 @Composable
 private fun MupaFloatingBottomBarOledPreview() {
     MupaTheme(appearance = MupaAppearance(isOledMode = true)) {

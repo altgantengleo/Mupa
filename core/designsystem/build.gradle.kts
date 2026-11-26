@@ -38,6 +38,8 @@ dependencies {
     api(libs.androidx.compose.animation)
     api(libs.androidx.compose.material3)
     api(libs.androidx.compose.material.icons.extended)
+    api(libs.coil.compose)
+    api(libs.haze.android)
 
     debugImplementation(libs.androidx.compose.ui.tooling)
 }

@@ -334,10 +334,12 @@ fun TrackListRow(
                 )
             }
         }
-        Text(
-            text = formatDurationMs(track.durationMs),
-            style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+        if (!display.durationText.isNullOrBlank()) {
+            Text(
+                text = display.durationText,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
     }
 }

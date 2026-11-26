@@ -274,15 +274,14 @@ fun HomeScreen(
                                         val display = TrackNameFormatter.format(track, stripArtistName)
                                         Column(
                                             modifier = Modifier
-                                                .width(136.dp)
-                                                .clip(MupaRadii.Card)
+                                                .width(148.dp)
                                                 .clickable { onPlayTrack(shelf.tracks, index) },
                                             verticalArrangement = Arrangement.spacedBy(6.dp),
                                         ) {
                                             TrackArtworkTile(
                                                 track = track,
                                                 modifier = Modifier
-                                                    .size(136.dp)
+                                                    .size(148.dp)
                                                     .clip(MupaRadii.ArtworkMedium),
                                                 iconSize = 36.dp,
                                             )

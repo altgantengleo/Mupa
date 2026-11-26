@@ -6,6 +6,7 @@ enum class AudioSourceType {
 }
 
 enum class GlassStyle {
+    SOLID,
     CRYSTAL,
     LIQUID_PLUS,
 }
@@ -38,6 +39,8 @@ data class Track(
     val originalFileName: String? = null,
     val isFavorite: Boolean = false,
     val playCount: Int = 0,
+    val dateAddedEpochMs: Long = 0L,
+    val lastPlayedEpochMs: Long = 0L,
 )
 
 data class Playlist(
@@ -52,14 +55,22 @@ data class LyricsLine(
     val timestampMs: Long,
     val endTimestampMs: Long? = null,
     val text: String,
+    val wordTimings: List<LyricsWord> = emptyList(),
+)
+
+data class LyricsWord(
+    val startMs: Long,
+    val endMs: Long,
+    val text: String,
 )
 
 data class UserPreferences(
     val onboardingCompleted: Boolean = false,
     val favoriteArtistIds: Set<String> = emptySet(),
-    val glassStyle: GlassStyle = GlassStyle.LIQUID_PLUS,
+    val glassStyle: GlassStyle = GlassStyle.SOLID,
     val isOledMode: Boolean = false,
     val isAuroraEnabled: Boolean = true,
     val isPerformanceMode: Boolean = false,
     val stripArtistName: Boolean = true,
+    val activeSource: AudioSourceType = AudioSourceType.STREAMING,
 )

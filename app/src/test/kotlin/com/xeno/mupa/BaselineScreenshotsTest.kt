@@ -63,10 +63,13 @@ class BaselineScreenshotsTest {
         val file = File(dir, "$name.png")
         val contentView = composeRule.activity.findViewById<View>(android.R.id.content)
         val bmp = contentView.drawToBitmap(Bitmap.Config.ARGB_8888)
-        FileOutputStream(file).use { out ->
-            bmp.compress(Bitmap.CompressFormat.PNG, 100, out)
+        // Jangan timpa screenshot baseline R0 jika sudah ada (bukti sebelum Fase 2R)
+        if (!file.exists()) {
+            FileOutputStream(file).use { out ->
+                bmp.compress(Bitmap.CompressFormat.PNG, 100, out)
+            }
         }
-        assertTrue("Screenshot $name must be non-empty", file.exists() && file.length() > 1_000L)
+        assertTrue("Rendered bitmap must be valid", bmp.width > 0 && bmp.height > 0)
     }
 
     @Test

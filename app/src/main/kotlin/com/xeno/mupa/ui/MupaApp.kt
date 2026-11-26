@@ -6,15 +6,21 @@ import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
@@ -23,8 +29,13 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.navigation.compose.currentBackStackEntryAsState
 import androidx.navigation.compose.rememberNavController
 import com.xeno.mupa.core.designsystem.component.MupaAuroraBackground
+import com.xeno.mupa.core.designsystem.theme.LocalMupaHazeState
+import com.xeno.mupa.core.designsystem.theme.LocalPlayerChromeInsets
+import com.xeno.mupa.core.designsystem.theme.PlayerChromeInsets
 import com.xeno.mupa.core.model.GlassStyle
 import com.xeno.mupa.core.model.Track
+import dev.chrisbanes.haze.HazeState
+import dev.chrisbanes.haze.hazeSource
 import com.xeno.mupa.navigation.MupaFloatingBottomBar
 import com.xeno.mupa.navigation.MupaNavHost
 import com.xeno.mupa.navigation.MupaTopLevelDestination
@@ -119,90 +130,120 @@ fun MupaApp(
     val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val navBarBottom = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
     val hasActiveTrack = playerState.currentTrack != null && showBottomBar
-    val miniPlayerClearance = if (hasActiveTrack) {
-        MupaPlayerSheetState.MiniPlayerHeight + 12.dp
-    } else {
-        0.dp
-    }
-    val bottomChrome = if (showBottomBar) MupaPlayerSheetState.BottomNavReservedHeight else 0.dp
-    val screenContentPadding = PaddingValues(
-        start = 20.dp,
-        end = 20.dp,
-        top = statusBarTop + 16.dp,
-        bottom = navBarBottom + bottomChrome + miniPlayerClearance + 16.dp,
+    val navBarTotal = if (showBottomBar) 64.dp + 12.dp else 0.dp
+    val miniTotal = if (hasActiveTrack) MupaPlayerSheetState.MiniPlayerHeight + 8.dp else 0.dp
+    val chromeHeight = navBarBottom + navBarTotal + miniTotal
+    val chromeInsets = PlayerChromeInsets(
+        topInset = statusBarTop,
+        bottomChromeHeight = chromeHeight,
+        bottomContentPadding = chromeHeight + 28.dp,
+        hasMiniPlayer = hasActiveTrack,
     )
+    val screenContentPadding = chromeInsets.screenPaddingValues()
+    val hazeState = remember { HazeState() }
+    val bgColor = MaterialTheme.colorScheme.background
 
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background),
+    CompositionLocalProvider(
+        LocalPlayerChromeInsets provides chromeInsets,
+        LocalMupaHazeState provides hazeState,
     ) {
-        MupaAuroraBackground()
-
-        MupaNavHost(
-            navController = navController,
-            uiState = uiState,
-            contentPadding = screenContentPadding,
-            onPlayTracks = onPlayTracks,
-            onGlassStyleChange = onGlassStyleChange,
-            onOledModeChange = onOledModeChange,
-            onAuroraEnabledChange = onAuroraEnabledChange,
-            onPerformanceModeChange = onPerformanceModeChange,
-            onStripArtistNameChange = onStripArtistNameChange,
-            onEditFavoriteArtists = onOpenEditFavoriteArtists,
-            modifier = Modifier
+        Box(
+            modifier = modifier
                 .fillMaxSize()
-                .graphicsLayer {
-                    val p = playerSheetState.progress
-                    val scale = 1f - 0.03f * p
-                    scaleX = scale
-                    scaleY = scale
-                },
-        )
-
-        if (showBottomBar) {
-            MupaPlayerOverlayHost(
-                playerState = playerState,
-                sheetState = playerSheetState,
-                bottomBarClearance = navBarBottom + MupaPlayerSheetState.BottomNavReservedHeight + 6.dp,
-                onTogglePlayPause = onTogglePlayPause,
-                onSeekTo = onSeekTo,
-                onSkipNext = onSkipNext,
-                onSkipPrevious = onSkipPrevious,
-                onToggleShuffle = onToggleShuffle,
-                onCycleRepeat = onCycleRepeat,
-                onToggleFavorite = onToggleFavorite,
-                onOpenOverlay = onOpenOverlay,
-                onCloseOverlay = onCloseOverlay,
-                onAdjustLyricsOffset = onAdjustLyricsOffset,
-                onResetLyricsOffset = onResetLyricsOffset,
-                onCycleSleepTimer = onCycleSleepTimer,
-                onSelectEqPreset = onSelectEqPreset,
-                onEqBandChange = onEqBandChange,
-                onResetEq = onResetEq,
-                onSelectQueueIndex = onSelectQueueIndex,
-                onMoveQueueItem = onMoveQueueItem,
-                onRemoveQueueItem = onRemoveQueueItem,
-            )
-
-            val navSlidePx = with(density) { (navBarBottom + MupaPlayerSheetState.BottomNavReservedHeight + 24.dp).toPx() }
-            MupaFloatingBottomBar(
-                currentDestination = currentDestination,
-                onSelectDestination = { destination ->
-                    if (destination != currentDestination) {
-                        navController.navigateToTopLevel(destination)
-                    }
-                },
+                .background(bgColor),
+        ) {
+            Box(
                 modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .navigationBarsPadding()
-                    .padding(horizontal = 20.dp, vertical = 14.dp)
-                    .graphicsLayer {
-                        val p = playerSheetState.progress
-                        translationY = navSlidePx * p
-                        alpha = (1f - p / 0.50f).coerceIn(0f, 1f)
+                    .fillMaxSize()
+                    .hazeSource(state = hazeState),
+            ) {
+                MupaAuroraBackground()
+
+                MupaNavHost(
+                    navController = navController,
+                    uiState = uiState,
+                    contentPadding = screenContentPadding,
+                    onPlayTracks = onPlayTracks,
+                    onGlassStyleChange = onGlassStyleChange,
+                    onOledModeChange = onOledModeChange,
+                    onAuroraEnabledChange = onAuroraEnabledChange,
+                    onPerformanceModeChange = onPerformanceModeChange,
+                    onStripArtistNameChange = onStripArtistNameChange,
+                    onEditFavoriteArtists = onOpenEditFavoriteArtists,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            val p = playerSheetState.progress
+                            val scale = 1f - 0.03f * p
+                            scaleX = scale
+                            scaleY = scale
+                        },
+                )
+            }
+
+            // Scrim gradasi bawah tepat di atas chrome melayang (latar transparan -> latar 95%) — perbaikan B1
+            if (showBottomBar) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .height(chromeHeight + 24.dp)
+                        .graphicsLayer {
+                            val p = playerSheetState.progress
+                            alpha = (1f - p / 0.35f).coerceIn(0f, 1f)
+                        }
+                        .background(
+                            Brush.verticalGradient(
+                                0.0f to Color.Transparent,
+                                0.22f to bgColor.copy(alpha = 0.88f),
+                                1.0f to bgColor.copy(alpha = 0.96f),
+                            ),
+                        ),
+                )
+
+                MupaPlayerOverlayHost(
+                    playerState = playerState,
+                    sheetState = playerSheetState,
+                    bottomBarClearance = navBarBottom + 64.dp + 12.dp + 8.dp,
+                    onTogglePlayPause = onTogglePlayPause,
+                    onSeekTo = onSeekTo,
+                    onSkipNext = onSkipNext,
+                    onSkipPrevious = onSkipPrevious,
+                    onToggleShuffle = onToggleShuffle,
+                    onCycleRepeat = onCycleRepeat,
+                    onToggleFavorite = onToggleFavorite,
+                    onOpenOverlay = onOpenOverlay,
+                    onCloseOverlay = onCloseOverlay,
+                    onAdjustLyricsOffset = onAdjustLyricsOffset,
+                    onResetLyricsOffset = onResetLyricsOffset,
+                    onCycleSleepTimer = onCycleSleepTimer,
+                    onSelectEqPreset = onSelectEqPreset,
+                    onEqBandChange = onEqBandChange,
+                    onResetEq = onResetEq,
+                    onSelectQueueIndex = onSelectQueueIndex,
+                    onMoveQueueItem = onMoveQueueItem,
+                    onRemoveQueueItem = onRemoveQueueItem,
+                )
+
+                val navSlidePx = with(density) { (navBarBottom + 88.dp).toPx() }
+                MupaFloatingBottomBar(
+                    currentDestination = currentDestination,
+                    onSelectDestination = { destination ->
+                        if (destination != currentDestination) {
+                            navController.navigateToTopLevel(destination)
+                        }
                     },
-            )
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .navigationBarsPadding()
+                        .padding(horizontal = 20.dp, vertical = 12.dp)
+                        .graphicsLayer {
+                            val p = playerSheetState.progress
+                            translationY = navSlidePx * p
+                            alpha = (1f - p / 0.50f).coerceIn(0f, 1f)
+                        },
+                )
+            }
         }
     }
 }

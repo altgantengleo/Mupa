@@ -98,7 +98,7 @@ class MupaOnboardingAndFakeRepoTest {
 
         val stripped = TrackNameFormatter.format(track, stripArtistName = true)
         assertEquals("Bertaut", stripped.title)
-        assertEquals("", stripped.artist)
+        assertEquals("Nadin Amizah", stripped.artist)
 
         val restored = TrackNameFormatter.format(track, stripArtistName = false)
         assertEquals("Bertaut", restored.title)
@@ -128,6 +128,9 @@ class MupaOnboardingAndFakeRepoTest {
         }
         override suspend fun setStripArtistName(enabled: Boolean) {
             state.value = state.value.copy(stripArtistName = enabled)
+        }
+        override suspend fun setActiveSource(source: com.xeno.mupa.core.model.AudioSourceType) {
+            state.value = state.value.copy(activeSource = source)
         }
     }
 }

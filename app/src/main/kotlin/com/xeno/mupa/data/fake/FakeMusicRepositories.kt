@@ -219,7 +219,10 @@ class FakeMusicSource @Inject constructor(
         ),
     )
 
-    override suspend fun getHomeRecommendations(seedArtistIds: Set<String>): Result<List<Playlist>> {
+    override suspend fun getHomeRecommendations(
+        seedArtistIds: Set<String>,
+        source: AudioSourceType,
+    ): Result<List<Playlist>> {
         val selectedArtists = artistRepository.getArtistsByIds(seedArtistIds).getOrDefault(emptyList())
         val selectedNames = selectedArtists.map { it.name.lowercase() }.toSet()
 
@@ -279,11 +282,12 @@ class FakeMusicSource @Inject constructor(
         )
     }
 
-    override suspend fun searchTracks(query: String): Result<List<Track>> {
+    override suspend fun searchTracks(query: String, source: AudioSourceType): Result<List<Track>> {
         val trimmed = query.trim()
-        if (trimmed.isEmpty()) return Result.success(allTracks)
+        val scoped = allTracks.filter { it.sourceType == source }
+        if (trimmed.isEmpty()) return Result.success(scoped)
         return Result.success(
-            allTracks.filter { track ->
+            scoped.filter { track ->
                 track.title.contains(trimmed, ignoreCase = true) ||
                     track.artistName.contains(trimmed, ignoreCase = true) ||
                     (track.albumTitle?.contains(trimmed, ignoreCase = true) == true)
@@ -291,5 +295,6 @@ class FakeMusicSource @Inject constructor(
         )
     }
 
-    override suspend fun getLibraryTracks(): Result<List<Track>> = Result.success(allTracks)
+    override suspend fun getLibraryTracks(source: AudioSourceType): Result<List<Track>> =
+        Result.success(allTracks.filter { it.sourceType == source })
 }

@@ -8,6 +8,7 @@ import androidx.datastore.preferences.core.emptyPreferences
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import com.xeno.mupa.core.domain.PreferencesRepository
+import com.xeno.mupa.core.model.AudioSourceType
 import com.xeno.mupa.core.model.GlassStyle
 import com.xeno.mupa.core.model.UserPreferences
 import kotlinx.coroutines.flow.Flow
@@ -31,9 +32,12 @@ class DataStorePreferencesRepository @Inject constructor(
             }
         }
         .map { prefs ->
-            val glassStyleName = prefs[KEY_GLASS_STYLE] ?: GlassStyle.LIQUID_PLUS.name
+            val glassStyleName = prefs[KEY_GLASS_STYLE] ?: GlassStyle.SOLID.name
             val glassStyle = GlassStyle.entries.firstOrNull { it.name == glassStyleName }
-                ?: GlassStyle.LIQUID_PLUS
+                ?: GlassStyle.SOLID
+            val sourceName = prefs[KEY_ACTIVE_SOURCE] ?: AudioSourceType.STREAMING.name
+            val activeSource = AudioSourceType.entries.firstOrNull { it.name == sourceName }
+                ?: AudioSourceType.STREAMING
 
             UserPreferences(
                 onboardingCompleted = prefs[KEY_ONBOARDING_COMPLETED] ?: false,
@@ -43,6 +47,7 @@ class DataStorePreferencesRepository @Inject constructor(
                 isAuroraEnabled = prefs[KEY_AURORA_ENABLED] ?: true,
                 isPerformanceMode = prefs[KEY_PERFORMANCE_MODE] ?: false,
                 stripArtistName = prefs[KEY_STRIP_ARTIST_NAME] ?: true,
+                activeSource = activeSource,
             )
         }
 
@@ -89,6 +94,12 @@ class DataStorePreferencesRepository @Inject constructor(
         }
     }
 
+    override suspend fun setActiveSource(source: AudioSourceType) {
+        dataStore.edit { prefs ->
+            prefs[KEY_ACTIVE_SOURCE] = source.name
+        }
+    }
+
     private companion object {
         val KEY_ONBOARDING_COMPLETED = booleanPreferencesKey("onboarding_completed")
         val KEY_FAVORITE_ARTIST_IDS = stringSetPreferencesKey("favorite_artist_ids")
@@ -97,5 +108,6 @@ class DataStorePreferencesRepository @Inject constructor(
         val KEY_AURORA_ENABLED = booleanPreferencesKey("aurora_enabled")
         val KEY_PERFORMANCE_MODE = booleanPreferencesKey("performance_mode")
         val KEY_STRIP_ARTIST_NAME = booleanPreferencesKey("strip_artist_name")
+        val KEY_ACTIVE_SOURCE = stringPreferencesKey("active_source")
     }
 }

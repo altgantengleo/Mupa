@@ -86,6 +86,10 @@ class MupaAppViewModel @Inject constructor(
         viewModelScope.launch { preferencesRepository.setStripArtistName(enabled) }
     }
 
+    fun setActiveSource(source: com.xeno.mupa.core.model.AudioSourceType) {
+        viewModelScope.launch { preferencesRepository.setActiveSource(source) }
+    }
+
     fun openEditFavoriteArtists() {
         _uiState.update { it.copy(isEditingFavoriteArtists = true) }
     }

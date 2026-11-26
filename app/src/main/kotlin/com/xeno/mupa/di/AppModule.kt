@@ -7,10 +7,16 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.preferencesDataStore
 import androidx.media3.common.audio.AudioProcessor
 import androidx.media3.common.util.UnstableApi
+import androidx.room.Room
 import com.xeno.mupa.R
 import com.xeno.mupa.core.domain.ArtistRepository
 import com.xeno.mupa.core.domain.MusicSource
 import com.xeno.mupa.core.domain.PreferencesRepository
+import com.xeno.mupa.data.local.db.LocalFolderDao
+import com.xeno.mupa.data.local.db.LocalTrackDao
+import com.xeno.mupa.data.local.db.LyricsCacheDao
+import com.xeno.mupa.data.local.db.MupaDatabase
+import com.xeno.mupa.data.local.db.UserPlaylistDao
 import com.xeno.mupa.data.lyrics.LrcLibLyricsProvider
 import com.xeno.mupa.data.preferences.DataStorePreferencesRepository
 import com.xeno.mupa.data.streaming.StreamingArtistRepository
@@ -48,6 +54,28 @@ object AppInfrastructureModule {
     fun providePreferencesDataStore(
         @ApplicationContext context: Context,
     ): DataStore<Preferences> = context.mupaPreferencesDataStore
+
+    @Provides
+    @Singleton
+    fun provideMupaDatabase(
+        @ApplicationContext context: Context,
+    ): MupaDatabase = Room.databaseBuilder(
+        context,
+        MupaDatabase::class.java,
+        "mupa_local.db",
+    ).fallbackToDestructiveMigration(dropAllTables = true).build()
+
+    @Provides
+    fun provideLocalTrackDao(db: MupaDatabase): LocalTrackDao = db.localTrackDao()
+
+    @Provides
+    fun provideLocalFolderDao(db: MupaDatabase): LocalFolderDao = db.localFolderDao()
+
+    @Provides
+    fun provideUserPlaylistDao(db: MupaDatabase): UserPlaylistDao = db.userPlaylistDao()
+
+    @Provides
+    fun provideLyricsCacheDao(db: MupaDatabase): LyricsCacheDao = db.lyricsCacheDao()
 
     @Provides
     @Singleton
