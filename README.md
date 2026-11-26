@@ -1,4 +1,4 @@
-# Music-X-Native (Mupa)
+# MUPA
 
 Struktur folder kerja. Isi sendiri sebelum menjalankan agent:
 
