@@ -19,6 +19,7 @@ import androidx.compose.foundation.gestures.awaitVerticalTouchSlopOrCancellation
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.verticalDrag
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -188,37 +189,37 @@ fun MupaPlayerOverlayHost(
         sheetState.travelDistancePx = collapsedTopPx.coerceAtLeast(1f)
 
         val progressProvider = remember(sheetState) { { sheetState.progress } }
+        val isSheetOpen = !sheetState.isCollapsed
 
-        // Detektor drag vertikal pada WADAH STASIONER (tidak pernah digeser translationY -> 0 feedback loop!)
-        val stationaryDragModifier = Modifier.pointerInput(sheetState, collapsedTopPx, miniHeightPx) {
+        // Helper drag vertikal berbasis koordinat layar (nodeTop + localY) agar 1:1 tanpa feedback loop
+        // dan TIDAK pernah memblokir sentuhan/scroll layar belakang saat Mini Player ciut!
+        val miniDragUpModifier = Modifier.pointerInput(sheetState, collapsedTopPx) {
             val velocityTracker = VelocityTracker()
             awaitEachGesture {
                 val down = awaitFirstDown(requireUnconsumed = false)
-                val pNow = sheetState.progress
-                val sheetTopNow = collapsedTopPx * (1f - pNow)
-                val sheetBottomNow = if (pNow < 0.05f) sheetTopNow + miniHeightPx else fullHeightPx
-                val insideSheet = down.position.y in (sheetTopNow - 12f)..(sheetBottomNow + 12f)
-                if (!insideSheet || playerState.isCinemaMode || sheetOverlayVisible) {
-                    return@awaitEachGesture
-                }
+                if (sheetState.progress >= 0.5f || playerState.isCinemaMode) return@awaitEachGesture
+                var lastScreenY = collapsedTopPx * (1f - sheetState.progress) + down.position.y
                 velocityTracker.resetTracking()
-                velocityTracker.addPosition(down.uptimeMillis, down.position)
+                velocityTracker.addPosition(down.uptimeMillis, Offset(down.position.x, lastScreenY))
                 var dragStarted = false
                 val dragChange = awaitVerticalTouchSlopOrCancellation(down.id) { change, over ->
-                    // Hanya ambil alih jika drag ke atas saat collapsed, atau drag ke bawah saat expanded
-                    val validDir = (pNow < 0.5f && over < 0f) || (pNow >= 0.5f && over > 0f)
-                    if (validDir) {
+                    if (over < 0f) {
                         change.consume()
                         dragStarted = true
+                        val curScreenY = collapsedTopPx * (1f - sheetState.progress) + change.position.y
+                        val dy = curScreenY - lastScreenY
+                        lastScreenY = curScreenY
                         sheetState.onDragStart()
-                        sheetState.onDragDelta(over)
+                        sheetState.onDragDelta(dy)
                     }
                 }
                 if (dragChange != null && dragStarted) {
                     verticalDrag(dragChange.id) { change ->
-                        val dy = change.positionChange().y
                         change.consume()
-                        velocityTracker.addPosition(change.uptimeMillis, change.position)
+                        val curScreenY = collapsedTopPx * (1f - sheetState.progress) + change.position.y
+                        val dy = curScreenY - lastScreenY
+                        lastScreenY = curScreenY
+                        velocityTracker.addPosition(change.uptimeMillis, Offset(change.position.x, curScreenY))
                         sheetState.onDragDelta(dy)
                     }
                     sheetState.onDragEnd(velocityTracker.calculateVelocity().y)
@@ -226,11 +227,46 @@ fun MupaPlayerOverlayHost(
             }
         }
 
-        // Lapisan wadah stasioner untuk scrim & detektor drag
+        val fullDragDownModifier = Modifier.pointerInput(sheetState, collapsedTopPx, sheetOverlayVisible, playerState.isCinemaMode) {
+            val velocityTracker = VelocityTracker()
+            awaitEachGesture {
+                val down = awaitFirstDown(requireUnconsumed = false)
+                if (sheetState.progress < 0.5f || playerState.isCinemaMode || sheetOverlayVisible) {
+                    return@awaitEachGesture
+                }
+                var lastScreenY = collapsedTopPx * (1f - sheetState.progress) + down.position.y
+                velocityTracker.resetTracking()
+                velocityTracker.addPosition(down.uptimeMillis, Offset(down.position.x, lastScreenY))
+                var dragStarted = false
+                val dragChange = awaitVerticalTouchSlopOrCancellation(down.id) { change, over ->
+                    if (over > 0f) {
+                        change.consume()
+                        dragStarted = true
+                        val curScreenY = collapsedTopPx * (1f - sheetState.progress) + change.position.y
+                        val dy = curScreenY - lastScreenY
+                        lastScreenY = curScreenY
+                        sheetState.onDragStart()
+                        sheetState.onDragDelta(dy)
+                    }
+                }
+                if (dragChange != null && dragStarted) {
+                    verticalDrag(dragChange.id) { change ->
+                        change.consume()
+                        val curScreenY = collapsedTopPx * (1f - sheetState.progress) + change.position.y
+                        val dy = curScreenY - lastScreenY
+                        lastScreenY = curScreenY
+                        velocityTracker.addPosition(change.uptimeMillis, Offset(change.position.x, curScreenY))
+                        sheetState.onDragDelta(dy)
+                    }
+                    sheetState.onDragEnd(velocityTracker.calculateVelocity().y)
+                }
+            }
+        }
+
+        // Lapisan wadah tanpa pointerInput global -> scroll & klik layar belakang 100% lancar saat Mini ciut!
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .then(stationaryDragModifier)
                 .drawBehind {
                     val p = progressProvider()
                     if (p > 0.005f) {
@@ -250,10 +286,23 @@ fun MupaPlayerOverlayHost(
                         translationY = collapsedTopPx * (1f - p)
                     },
             ) {
-                // Lapisan 1: Backdrop Full Now Playing (penuh di p=0.18, overlap aman dengan Mini di 0.25)
+                // Lapisan 1: Backdrop Full Now Playing (hanya menangkap sentuhan saat sheet terbuka)
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
+                        .then(
+                            if (isSheetOpen) {
+                                Modifier
+                                    .clickable(
+                                        interactionSource = remember { MutableInteractionSource() },
+                                        indication = null,
+                                        onClick = {},
+                                    )
+                                    .then(fullDragDownModifier)
+                            } else {
+                                Modifier
+                            },
+                        )
                         .graphicsLayer {
                             val p = progressProvider()
                             alpha = (p / 0.18f).coerceIn(0f, 1f)
@@ -276,7 +325,7 @@ fun MupaPlayerOverlayHost(
                         },
                 )
 
-                // Lapisan 2: Full Now Playing Content
+                // Lapisan 2: Full Now Playing Content (halus tanpa lompatan artwork palsu)
                 FullNowPlayingContent(
                     track = track,
                     stripArtistName = stripArtistName,
@@ -301,25 +350,23 @@ fun MupaPlayerOverlayHost(
                     onCycleSleepTimer = onCycleSleepTimer,
                     modifier = Modifier
                         .fillMaxSize()
+                        .then(if (isSheetOpen) fullDragDownModifier else Modifier)
                         .layout { measurable, constraints ->
                             val p = progressProvider()
                             val placeable = measurable.measure(constraints)
                             layout(placeable.width, placeable.height) {
-                                if (p > 0.08f) {
+                                if (p > 0.04f) {
                                     placeable.placeRelative(0, 0)
                                 }
                             }
                         }
                         .graphicsLayer {
                             val p = progressProvider()
-                            alpha = ((p - 0.16f) / 0.60f).coerceIn(0f, 1f)
-                            val scale = 0.96f + 0.04f * p
-                            scaleX = scale
-                            scaleY = scale
+                            alpha = ((p - 0.10f) / 0.42f).coerceIn(0f, 1f)
                         },
                 )
 
-                // Lapisan 3: Mini Player (tap pasti membuka Full Now Playing!)
+                // Lapisan 3: Mini Player (hanya area 64dp yang menangkap tap & drag-up!)
                 MiniPlayerBar(
                     track = track,
                     stripArtistName = stripArtistName,
@@ -333,64 +380,23 @@ fun MupaPlayerOverlayHost(
                         .fillMaxWidth()
                         .padding(horizontal = 20.dp)
                         .height(MupaPlayerSheetState.MiniPlayerHeight)
+                        .then(miniDragUpModifier)
                         .layout { measurable, constraints ->
                             val p = progressProvider()
                             val placeable = measurable.measure(constraints)
                             layout(placeable.width, placeable.height) {
-                                if (p < 0.30f) {
+                                if (p < 0.28f) {
                                     placeable.placeRelative(0, 0)
                                 }
                             }
                         }
                         .graphicsLayer {
                             val p = progressProvider()
-                            alpha = (1f - p / 0.26f).coerceIn(0f, 1f)
+                            alpha = (1f - p / 0.22f).coerceIn(0f, 1f)
                         },
                 )
 
-                // Lapisan 4: Morphing Artwork selama transisi 0.03..0.95
-                val heroSize = (containerMaxWidth - 48.dp).coerceIn(220.dp, 340.dp)
-                Box(
-                    modifier = Modifier
-                        .layout { measurable, _ ->
-                            val p = progressProvider()
-                            val sizeDp = lerp(44.dp, heroSize, p)
-                            val sizePx = sizeDp.roundToPx().coerceAtLeast(1)
-                            val placeable = measurable.measure(
-                                androidx.compose.ui.unit.Constraints.fixed(sizePx, sizePx),
-                            )
-                            val startX = 30.dp.toPx()
-                            val endX = ((containerMaxWidth.toPx() - sizePx) / 2f).coerceAtLeast(0f)
-                            val startY = 10.dp.toPx()
-                            val endY = 108.dp.toPx()
-                            val x = (startX + (endX - startX) * p).roundToInt()
-                            val y = (startY + (endY - startY) * p).roundToInt()
-                            layout(0, 0) {
-                                if (p in 0.03f..0.95f && playerState.activeOverlay != PlayerOverlayPane.LYRICS) {
-                                    placeable.placeRelative(x, y)
-                                }
-                            }
-                        }
-                        .graphicsLayer {
-                            val p = progressProvider()
-                            alpha = when {
-                                p < 0.08f -> (p / 0.08f).coerceIn(0f, 1f)
-                                p > 0.87f -> ((0.95f - p) / 0.08f).coerceIn(0f, 1f)
-                                else -> 1f
-                            }
-                            val cornerPx = lerp(12.dp, 28.dp, p).toPx()
-                            shape = RoundedCornerShape(cornerPx)
-                            clip = true
-                        },
-                ) {
-                    TrackArtworkTile(
-                        track = track,
-                        modifier = Modifier.fillMaxSize(),
-                        iconSize = 42.dp,
-                    )
-                }
-
-                // Lapisan 5: Sheet Antrean & Equalizer (Emphasized Decelerate, 2-frame pre-mount)
+                // Lapisan 4: Sheet Antrean & Equalizer (Emphasized Decelerate, 2-frame pre-mount)
                 AnimatedVisibility(
                     visible = sheetOverlayVisible && sheetState.isExpanded,
                     enter = slideInVertically(
@@ -426,11 +432,13 @@ fun MupaPlayerOverlayHost(
                 }
             }
 
-            // Lapisan 6: Mode Cinema Layar Penuh
+            // Lapisan 5: Mode Cinema Layar Penuh (transisi halus tanpa lompatan)
             AnimatedVisibility(
                 visible = playerState.isCinemaMode,
-                enter = fadeIn(MupaMotion.emphasizedTween(MupaMotion.DurationMediumMs)),
-                exit = fadeOut(MupaMotion.standardTween(MupaMotion.DurationShortMs)),
+                enter = fadeIn(MupaMotion.emphasizedTween(MupaMotion.DurationMediumMs)) +
+                    slideInVertically(MupaMotion.emphasizedTween(MupaMotion.DurationMediumMs)) { it / 18 },
+                exit = fadeOut(MupaMotion.standardTween(MupaMotion.DurationShortMs)) +
+                    slideOutVertically(MupaMotion.standardTween(MupaMotion.DurationShortMs)) { it / 18 },
             ) {
                 MupaCinemaOverlay(
                     track = track,
@@ -731,7 +739,9 @@ internal fun FullNowPlayingContent(
                             }
                             .graphicsLayer {
                                 val p = progressProvider()
-                                alpha = if (p > 0.88f) ((p - 0.88f) / 0.08f).coerceIn(0f, 1f) else 0f
+                                val s = 0.92f + 0.08f * p
+                                scaleX = s
+                                scaleY = s
                             },
                         contentAlignment = Alignment.Center,
                     ) {

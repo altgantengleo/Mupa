@@ -2,6 +2,7 @@ package com.xeno.mupa.ui.player
 
 import android.graphics.Bitmap
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.Image
@@ -45,6 +46,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
@@ -158,25 +160,36 @@ fun MupaCinemaOverlay(
                 lastTouchMs = System.currentTimeMillis()
             },
     ) {
-        // Backdrop blurred one-shot + scrim gradasi
+        // Backdrop blurred one-shot fade-in halus + scrim gradasi (tidak pernah pop mendadak)
+        val backdropAlpha by animateFloatAsState(
+            targetValue = if (cachedBlurredBackdrop != null) 1f else 0f,
+            animationSpec = MupaMotion.standardTween(MupaMotion.DurationMediumMs),
+            label = "cinemaBackdropAlpha",
+        )
         cachedBlurredBackdrop?.let { bmp ->
-            Image(
-                bitmap = bmp.asImageBitmap(),
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize(),
-            )
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(
-                        Brush.verticalGradient(
-                            0.0f to Color.Black.copy(alpha = 0.65f),
-                            0.45f to Color.Black.copy(alpha = 0.58f),
-                            1.0f to Color.Black.copy(alpha = 0.86f),
+                    .graphicsLayer { alpha = backdropAlpha },
+            ) {
+                Image(
+                    bitmap = bmp.asImageBitmap(),
+                    contentDescription = null,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize(),
+                )
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(
+                                0.0f to Color.Black.copy(alpha = 0.65f),
+                                0.45f to Color.Black.copy(alpha = 0.58f),
+                                1.0f to Color.Black.copy(alpha = 0.86f),
+                            ),
                         ),
-                    ),
-            )
+                )
+            }
         }
 
         // Konten utama Cinema: lirik besar atau cover besar + judul
