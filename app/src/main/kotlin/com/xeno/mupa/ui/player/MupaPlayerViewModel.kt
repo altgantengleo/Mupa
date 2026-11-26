@@ -6,6 +6,9 @@ import com.xeno.mupa.core.model.AudioSourceType
 import com.xeno.mupa.core.model.LyricsLine
 import com.xeno.mupa.core.model.Track
 import com.xeno.mupa.playback.QueuePersistenceStore
+import com.xeno.mupa.playback.eq.EqPreset
+import com.xeno.mupa.playback.eq.FiveBandEqualizerProcessor
+import com.xeno.mupa.streaming.api.StreamingLyricsProvider
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -18,11 +21,14 @@ import kotlinx.coroutines.launch
 import javax.inject.Inject
 
 /**
- * ViewModel player terhubung dengan QueuePersistenceStore (Tahap 2).
+ * ViewModel player terhubung dengan QueuePersistenceStore, FiveBandEqualizerProcessor,
+ * dan StreamingLyricsProvider (LRCLib) pada Tahap 4.
  */
 @HiltViewModel
 class MupaPlayerViewModel @Inject constructor(
     private val queueStore: QueuePersistenceStore,
+    private val equalizerProcessor: FiveBandEqualizerProcessor,
+    private val lyricsProvider: StreamingLyricsProvider,
 ) : ViewModel() {
 
     private val sampleTracks: List<Track> = listOf(
@@ -253,9 +259,10 @@ class MupaPlayerViewModel @Inject constructor(
     }
 
     fun openOverlay(pane: PlayerOverlayPane) {
-        _uiState.update {
-            val target = if (it.activeOverlay == pane) PlayerOverlayPane.NONE else pane
-            it.copy(activeOverlay = target)
+        val target = if (_uiState.value.activeOverlay == pane) PlayerOverlayPane.NONE else pane
+        _uiState.update { it.copy(activeOverlay = target) }
+        if (target == PlayerOverlayPane.LYRICS) {
+            fetchLyricsForCurrentTrack()
         }
     }
 
@@ -271,6 +278,38 @@ class MupaPlayerViewModel @Inject constructor(
 
     fun resetLyricsOffset() {
         _uiState.update { it.copy(lyricsOffsetMs = 0L) }
+    }
+
+    fun selectEqPreset(preset: EqPreset) {
+        equalizerProcessor.setBandGains(preset.gainsDb)
+        _uiState.update { it.copy(eqPreset = preset, eqGainsDb = preset.gainsDb) }
+    }
+
+    fun updateEqBand(bandIndex: Int, gainDb: Float) {
+        val current = _uiState.value.eqGainsDb.toMutableList()
+        if (bandIndex !in current.indices) return
+        current[bandIndex] = gainDb.coerceIn(
+            FiveBandEqualizerProcessor.MIN_GAIN_DB,
+            FiveBandEqualizerProcessor.MAX_GAIN_DB,
+        )
+        equalizerProcessor.setBandGains(current)
+        _uiState.update { it.copy(eqPreset = EqPreset.CUSTOM, eqGainsDb = current) }
+    }
+
+    fun resetEq() {
+        selectEqPreset(EqPreset.FLAT)
+    }
+
+    fun fetchLyricsForCurrentTrack() {
+        val track = _uiState.value.currentTrack ?: return
+        viewModelScope.launch {
+            lyricsProvider.fetchLyrics(track.title, track.artistName, track.durationMs)
+                .onSuccess { remoteLines ->
+                    if (remoteLines.isNotEmpty() && _uiState.value.currentTrack?.id == track.id) {
+                        _uiState.update { it.copy(lyrics = remoteLines) }
+                    }
+                }
+        }
     }
 
     fun cycleSleepTimer() {

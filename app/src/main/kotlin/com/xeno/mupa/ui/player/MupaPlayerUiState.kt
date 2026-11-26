@@ -5,6 +5,7 @@ import androidx.compose.ui.graphics.Color
 import com.xeno.mupa.core.designsystem.theme.DynamicCoverAccent
 import com.xeno.mupa.core.model.LyricsLine
 import com.xeno.mupa.core.model.Track
+import com.xeno.mupa.playback.eq.EqPreset
 
 enum class RepeatMode {
     OFF,
@@ -16,6 +17,7 @@ enum class PlayerOverlayPane {
     NONE,
     LYRICS,
     QUEUE,
+    EQUALIZER,
 }
 
 @Immutable
@@ -30,6 +32,8 @@ data class MupaPlayerUiState(
     val repeatMode: RepeatMode = RepeatMode.OFF,
     val lyrics: List<LyricsLine> = emptyList(),
     val lyricsOffsetMs: Long = 0L,
+    val eqPreset: EqPreset = EqPreset.FLAT,
+    val eqGainsDb: List<Float> = EqPreset.FLAT.gainsDb,
     val activeOverlay: PlayerOverlayPane = PlayerOverlayPane.NONE,
     val sleepTimerMinutes: Int? = null,
     val isBuffering: Boolean = false,

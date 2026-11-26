@@ -11,6 +11,7 @@ import com.xeno.mupa.R
 import com.xeno.mupa.core.domain.ArtistRepository
 import com.xeno.mupa.core.domain.MusicSource
 import com.xeno.mupa.core.domain.PreferencesRepository
+import com.xeno.mupa.data.lyrics.LrcLibLyricsProvider
 import com.xeno.mupa.data.preferences.DataStorePreferencesRepository
 import com.xeno.mupa.data.streaming.StreamingArtistRepository
 import com.xeno.mupa.data.streaming.StreamingMusicSource
@@ -18,7 +19,9 @@ import com.xeno.mupa.engine.local.ScopedStorageAudioScanner
 import com.xeno.mupa.playback.MupaAudioCache
 import com.xeno.mupa.playback.PlaybackServiceConfig
 import com.xeno.mupa.playback.QueuePersistenceStore
+import com.xeno.mupa.playback.eq.FiveBandEqualizerProcessor
 import com.xeno.mupa.streaming.aggregator.ProviderRegistry
+import com.xeno.mupa.streaming.api.StreamingLyricsProvider
 import com.xeno.mupa.streaming.innertube.InnerTubeProvider
 import com.xeno.mupa.streaming.jiosaavn.JioSaavnProvider
 import dagger.Binds
@@ -100,8 +103,20 @@ object AppInfrastructureModule {
 
     @Provides
     @Singleton
+    fun provideFiveBandEqualizerProcessor(): FiveBandEqualizerProcessor =
+        FiveBandEqualizerProcessor()
+
+    @Provides
+    @Singleton
+    fun provideLyricsProvider(client: OkHttpClient): StreamingLyricsProvider =
+        LrcLibLyricsProvider(client)
+
+    @Provides
+    @Singleton
     @OptIn(UnstableApi::class)
-    fun provideCustomAudioProcessors(): List<@JvmSuppressWildcards AudioProcessor> = emptyList()
+    fun provideCustomAudioProcessors(
+        equalizerProcessor: FiveBandEqualizerProcessor,
+    ): List<@JvmSuppressWildcards AudioProcessor> = listOf(equalizerProcessor)
 }
 
 @Module

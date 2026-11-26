@@ -93,4 +93,20 @@ class MupaAppViewModel @Inject constructor(
     fun closeEditFavoriteArtists() {
         _uiState.update { it.copy(isEditingFavoriteArtists = false) }
     }
+
+    fun applyRestoredBackup(
+        restored: com.xeno.mupa.data.backup.MupaBackupCodec.RestoredBackup,
+    ) {
+        viewModelScope.launch {
+            val p = restored.preferences
+            preferencesRepository.setGlassStyle(p.glassStyle)
+            preferencesRepository.setOledMode(p.isOledMode)
+            preferencesRepository.setAuroraEnabled(p.isAuroraEnabled)
+            preferencesRepository.setPerformanceMode(p.isPerformanceMode)
+            preferencesRepository.setStripArtistName(p.stripArtistName)
+            if (p.favoriteArtistIds.size >= 2) {
+                preferencesRepository.setOnboardingCompleted(p.favoriteArtistIds)
+            }
+        }
+    }
 }

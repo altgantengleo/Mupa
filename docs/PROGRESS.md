@@ -5,7 +5,7 @@
 ---
 
 ## Status Saat Ini
-- **Tahap Aktif:** **Tahap 3 (Local Mode Rust + UniFFI + Scoped Storage)** — **SELESAI** · Lanjut ke **Tahap 4 (Integrasi Penuh, Lirik, EQ 5-Band, Backup/Restore)**
+- **Tahap Aktif:** **Tahap 4 (Integrasi Penuh, Lirik, EQ 5-Band, Backup/Restore)** — **SELESAI** · Lanjut ke **Tahap 5 (Optimasi, Baseline Profile, R8 Release & `docs/TEST-DEVICE.md`)**
 - **Branch Git:** `stage-1a/foundation` (commit terpisah per tahap)
 - **Lisensi:** **GPL-3.0** (`LICENSE` & `NOTICE` aktif)
 
@@ -20,8 +20,9 @@
 | **Tahap 1B: Player, Lirik, Antrean** | **Selesai** (`bfdf8fe`) | 100% | `MupaPlayerSheetState` (1 state progres 0..1 di layout/draw, nol overshoot, anti-kedip), Mini↔Full (tanpa Semi), Lirik wipe adaptif, Antrean + 2-frame pre-mount. |
 | **Tahap 1C: Layar Penuh & Onboarding** | **Selesai** (`536f9b7`) | 100% | Fake repositories, Onboarding Artis wajib, Beranda, Cari, Pustaka, Akun, Pengaturan. |
 | **Tahap 2: Streaming** | **Selesai** (`c2e93da`) | 100% | `:streaming:*`, `:playback` Media3 + 500 MB cache + JSON queue, `docs/STREAMING.md`. |
-| **Tahap 3: Rust Local Mode** | **Selesai** | 100% | Workspace Rust `engine/local-rust/` (`lofty`, `rusqlite`, `uniffi`, Mix Mupa MMR, Hapus Nama Artis non-destruktif), `:engine:local` (Scoped Storage MediaStore/SAF + cermin algoritma), integrasi artis lokal ke Onboarding/Beranda, job `cargo test` + `cargo-ndk` (`arm64-v8a`, `x86_64`) di CI. *(Catatan: `cargo` tidak terpasang di PC ini sehingga kompilasi/uji Rust akan diverifikasi di GitHub Actions CI.)* |
-| **Tahap 4: Integrasi** | **Sedang dikerjakan** | 0% | Lirik nyata (LRC parser + LRCLib online + tag tersemat), EQ 5-band nyata (Media3 `BaseAudioProcessor` + UI sheet), Backup/Restore JSON (tanpa rahasia), uji stabilitas. |
+| **Tahap 3: Rust Local Mode** | **Selesai** (`2dcd190`) | 100% | Workspace Rust `engine/local-rust/`, `:engine:local` Scoped Storage, CI `cargo-ndk`. |
+| **Tahap 4: Integrasi** | **Selesai** | 100% | EQ 5-band nyata (`FiveBandEqualizerProcessor` RBJ biquad di Media3 + `MupaEqualizerOverlay`), LRC parser + LRCLib online (`LrcLibLyricsProvider`), `MupaBackupCodec` JSON (tanpa rahasia), 30/30 unit test lulus, lint 0 error. |
+| **Tahap 5: Optimasi** | **Sedang dikerjakan** | 0% | Baseline Profile (`profileinstaller` + `baseline-prof.txt`), Compose stability config, R8/minify release verification (`assembleRelease`), startup & memory trim cleanup, Mode Performa HP lemah, `docs/TEST-DEVICE.md`. |
 | **Tahap 2: Streaming** | Belum mulai | 0% | Klien InnerTube + penyedia fallback terisolasi, Media3 service/session/notifikasi/cache/queue. |
 | **Tahap 3: Rust Local Mode** | Belum mulai | 0% | Crate Rust (import, scan folder, metadata/tag, DB lokal, rekomendasi lokal, Hapus Nama Artis) + UniFFI/JNI + unit test. |
 | **Tahap 4: Integrasi** | Belum mulai | 0% | Gabung streaming + lokal, lirik nyata, EQ nyata, backup/restore, uji stabilitas. |

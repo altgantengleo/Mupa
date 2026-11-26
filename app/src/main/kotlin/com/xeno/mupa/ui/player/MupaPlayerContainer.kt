@@ -117,7 +117,9 @@ fun MupaPlayerOverlayHost(
     onAdjustLyricsOffset: (Long) -> Unit,
     onResetLyricsOffset: () -> Unit,
     onCycleSleepTimer: () -> Unit,
-    onOpenEqualizer: () -> Unit,
+    onSelectEqPreset: (com.xeno.mupa.playback.eq.EqPreset) -> Unit,
+    onEqBandChange: (Int, Float) -> Unit,
+    onResetEq: () -> Unit,
     onSelectQueueIndex: (Int) -> Unit,
     onMoveQueueItem: (Int, Int) -> Unit,
     onRemoveQueueItem: (Int) -> Unit,
@@ -253,7 +255,7 @@ fun MupaPlayerOverlayHost(
                 onToggleFavorite = onToggleFavorite,
                 onOpenLyrics = { onOpenOverlay(PlayerOverlayPane.LYRICS) },
                 onOpenQueue = { onOpenOverlay(PlayerOverlayPane.QUEUE) },
-                onOpenEqualizer = onOpenEqualizer,
+                onOpenEqualizer = { onOpenOverlay(PlayerOverlayPane.EQUALIZER) },
                 onCycleSleepTimer = onCycleSleepTimer,
                 modifier = Modifier
                     .fillMaxSize()
@@ -374,6 +376,14 @@ fun MupaPlayerOverlayHost(
                         onSelectIndex = onSelectQueueIndex,
                         onMoveItem = onMoveQueueItem,
                         onRemoveItem = onRemoveQueueItem,
+                        onClose = onCloseOverlay,
+                    )
+                    PlayerOverlayPane.EQUALIZER -> MupaEqualizerOverlay(
+                        activePreset = playerState.eqPreset,
+                        bandGainsDb = playerState.eqGainsDb,
+                        onSelectPreset = onSelectEqPreset,
+                        onBandGainChange = onEqBandChange,
+                        onReset = onResetEq,
                         onClose = onCloseOverlay,
                     )
                     PlayerOverlayPane.NONE -> Unit
