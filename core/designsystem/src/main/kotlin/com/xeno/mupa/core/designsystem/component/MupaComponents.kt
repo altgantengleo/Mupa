@@ -378,7 +378,7 @@ fun MupaSegmentedTabs(
                     .background(bg)
                     .semantics { selected = isSelected }
                     .clickable(role = Role.Tab) { onSelect(index) }
-                    .padding(horizontal = 14.dp, vertical = 8.dp),
+                    .padding(horizontal = 11.dp, vertical = 7.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 Text(

@@ -1,20 +1,23 @@
 package com.xeno.mupa.ui
 
+import android.net.Uri
 import androidx.compose.runtime.Immutable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.xeno.mupa.core.designsystem.theme.DynamicCoverAccent
 import com.xeno.mupa.core.designsystem.theme.MupaAppearance
 import com.xeno.mupa.core.domain.ArtistRepository
-import com.xeno.mupa.core.domain.MusicSource
 import com.xeno.mupa.core.domain.PreferencesRepository
 import com.xeno.mupa.core.model.Artist
+import com.xeno.mupa.core.model.AudioSourceType
 import com.xeno.mupa.core.model.GlassStyle
 import com.xeno.mupa.core.model.UserPreferences
+import com.xeno.mupa.data.local.LocalLibraryRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
@@ -42,7 +45,7 @@ data class MupaAppUiState(
 class MupaAppViewModel @Inject constructor(
     private val preferencesRepository: PreferencesRepository,
     private val artistRepository: ArtistRepository,
-    private val musicSource: MusicSource,
+    private val localLibraryRepository: LocalLibraryRepository,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(MupaAppUiState())
@@ -50,16 +53,20 @@ class MupaAppViewModel @Inject constructor(
 
     init {
         viewModelScope.launch {
-            preferencesRepository.userPreferences.collect { prefs ->
+            combine(
+                preferencesRepository.userPreferences,
+                localLibraryRepository.localTracksFlow,
+            ) { prefs, localTracks ->
+                prefs to localTracks
+            }.collect { (prefs, localTracks) ->
                 val artists = artistRepository.getArtistsByIds(prefs.favoriteArtistIds).getOrDefault(emptyList())
-                val tracks = musicSource.getLibraryTracks().getOrDefault(emptyList())
                 _uiState.update {
                     it.copy(
                         isReady = true,
                         preferences = prefs,
                         favoriteArtists = artists,
-                        totalTracksCount = tracks.size,
-                        favoriteTracksCount = tracks.count { t -> t.isFavorite },
+                        totalTracksCount = localTracks.size,
+                        favoriteTracksCount = localTracks.count { t -> t.isFavorite },
                     )
                 }
             }
@@ -86,8 +93,16 @@ class MupaAppViewModel @Inject constructor(
         viewModelScope.launch { preferencesRepository.setStripArtistName(enabled) }
     }
 
-    fun setActiveSource(source: com.xeno.mupa.core.model.AudioSourceType) {
+    fun setActiveSource(source: AudioSourceType) {
         viewModelScope.launch { preferencesRepository.setActiveSource(source) }
+    }
+
+    fun importLocalFiles(uris: List<Uri>) {
+        viewModelScope.launch { localLibraryRepository.importAudioFiles(uris) }
+    }
+
+    fun importLocalFolder(treeUri: Uri) {
+        viewModelScope.launch { localLibraryRepository.importAudioFolder(treeUri) }
     }
 
     fun openEditFavoriteArtists() {

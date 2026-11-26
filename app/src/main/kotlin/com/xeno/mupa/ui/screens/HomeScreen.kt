@@ -1,52 +1,67 @@
 package com.xeno.mupa.ui.screens
 
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.Cloud
+import androidx.compose.material.icons.rounded.LibraryMusic
+import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Refresh
-import androidx.compose.material3.Button
-import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material.icons.rounded.Smartphone
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.xeno.mupa.core.designsystem.component.MupaBrandMark
-import com.xeno.mupa.core.designsystem.component.MupaGlassSurface
+import com.xeno.mupa.core.designsystem.component.MupaArtworkBox
+import com.xeno.mupa.core.designsystem.component.MupaCoverCard
+import com.xeno.mupa.core.designsystem.component.MupaCoverCardSkeleton
+import com.xeno.mupa.core.designsystem.component.MupaEmptyState
+import com.xeno.mupa.core.designsystem.component.MupaErrorState
+import com.xeno.mupa.core.designsystem.component.MupaLogoGlyph
+import com.xeno.mupa.core.designsystem.component.MupaPrimaryButton
+import com.xeno.mupa.core.designsystem.component.MupaSectionHeader
+import com.xeno.mupa.core.designsystem.component.MupaSkeletonBox
 import com.xeno.mupa.core.designsystem.theme.MupaPalette
 import com.xeno.mupa.core.designsystem.theme.MupaRadii
+import com.xeno.mupa.core.designsystem.theme.MupaSpacing
 import com.xeno.mupa.core.domain.MusicSource
 import com.xeno.mupa.core.domain.PreferencesRepository
+import com.xeno.mupa.core.model.AudioSourceType
 import com.xeno.mupa.core.model.Playlist
 import com.xeno.mupa.core.model.Track
-import com.xeno.mupa.data.fake.TrackNameFormatter
-import com.xeno.mupa.ui.player.TrackArtworkTile
+import com.xeno.mupa.core.model.TrackDisplayRules
+import com.xeno.mupa.data.local.LocalLibraryRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
@@ -57,6 +72,8 @@ import javax.inject.Inject
 @Immutable
 data class HomeUiState(
     val greeting: String = "Selamat datang",
+    val activeSource: AudioSourceType = AudioSourceType.STREAMING,
+    val mixHero: Playlist? = null,
     val shelves: List<Playlist> = emptyList(),
     val isLoading: Boolean = true,
     val errorMessage: String? = null,
@@ -67,52 +84,74 @@ data class HomeUiState(
 class HomeViewModel @Inject constructor(
     private val musicSource: MusicSource,
     private val preferencesRepository: PreferencesRepository,
+    private val localLibraryRepository: LocalLibraryRepository,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(HomeUiState(greeting = computeGreeting()))
     val uiState: StateFlow<HomeUiState> = _uiState.asStateFlow()
 
     private var latestSeeds: Set<String> = emptySet()
+    private var latestSource: AudioSourceType = AudioSourceType.STREAMING
 
     init {
         viewModelScope.launch {
-            preferencesRepository.userPreferences
-                .map { it.favoriteArtistIds }
-                .distinctUntilChanged()
-                .collect { seeds ->
-                    latestSeeds = seeds
-                    loadShelves(seeds, _uiState.value.mixSeed)
-                }
+            combine(
+                preferencesRepository.userPreferences
+                    .map { it.favoriteArtistIds to it.activeSource }
+                    .distinctUntilChanged(),
+                localLibraryRepository.localTracksFlow.map { it.size }.distinctUntilChanged(),
+            ) { (seeds, source), _ ->
+                seeds to source
+            }.collect { (seeds, source) ->
+                latestSeeds = seeds
+                latestSource = source
+                loadShelves(seeds, source, _uiState.value.mixSeed)
+            }
         }
     }
 
     fun reshuffleMix() {
         val nextSeed = _uiState.value.mixSeed + 1
-        _uiState.update { it.copy(mixSeed = nextSeed) }
-        loadShelves(latestSeeds, nextSeed)
+        _uiState.update { state ->
+            val currentHero = state.mixHero
+            val rotatedHero = if (currentHero != null && currentHero.tracks.size > 1) {
+                val shift = nextSeed % currentHero.tracks.size
+                currentHero.copy(tracks = currentHero.tracks.drop(shift) + currentHero.tracks.take(shift))
+            } else {
+                currentHero
+            }
+            state.copy(mixSeed = nextSeed, mixHero = rotatedHero)
+        }
     }
 
     fun retry() {
-        loadShelves(latestSeeds, _uiState.value.mixSeed)
+        loadShelves(latestSeeds, latestSource, _uiState.value.mixSeed)
     }
 
-    private fun loadShelves(seedIds: Set<String>, seed: Int) {
+    private fun loadShelves(seedIds: Set<String>, source: AudioSourceType, seed: Int) {
         viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true, errorMessage = null) }
-            musicSource.getHomeRecommendations(seedIds)
+            _uiState.update { it.copy(isLoading = true, activeSource = source, errorMessage = null) }
+            musicSource.getHomeRecommendations(seedIds, source)
                 .onSuccess { raw ->
-                    val adjusted = raw.map { shelf ->
-                        if (shelf.id == "shelf_mix_mupa" && seed > 0 && shelf.tracks.size > 1) {
-                            val shift = seed % shelf.tracks.size
-                            shelf.copy(tracks = shelf.tracks.drop(shift) + shelf.tracks.take(shift))
-                        } else {
-                            shelf
-                        }
+                    val rawHero = raw.firstOrNull { it.id == "shelf_mix_mupa" }
+                    val adjustedHero = if (rawHero != null && seed > 0 && rawHero.tracks.size > 1) {
+                        val shift = seed % rawHero.tracks.size
+                        rawHero.copy(tracks = rawHero.tracks.drop(shift) + rawHero.tracks.take(shift))
+                    } else {
+                        rawHero
                     }
+                    // Hapus shelf Mix Mupa ganda dari daftar shelf (perbaikan B3)
+                    val nonHeroShelves = raw
+                        .filterNot { it.id == "shelf_mix_mupa" }
+                        .filter { it.tracks.isNotEmpty() }
+                        .take(3)
+
                     _uiState.update {
                         it.copy(
                             greeting = computeGreeting(),
-                            shelves = adjusted,
+                            activeSource = source,
+                            mixHero = adjustedHero,
+                            shelves = nonHeroShelves,
                             isLoading = false,
                             errorMessage = null,
                         )
@@ -121,6 +160,7 @@ class HomeViewModel @Inject constructor(
                 .onFailure { err ->
                     _uiState.update {
                         it.copy(
+                            activeSource = source,
                             isLoading = false,
                             errorMessage = err.message ?: "Gagal memuat beranda.",
                         )
@@ -148,167 +188,250 @@ fun HomeScreen(
     onPlayTrack: (List<Track>, Int) -> Unit,
     onReshuffleMix: () -> Unit,
     onRetry: () -> Unit,
+    onImportLocalFiles: () -> Unit = {},
+    onImportLocalFolder: () -> Unit = {},
+    onToggleSource: ((AudioSourceType) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
-    when {
-        uiState.isLoading && uiState.shelves.isEmpty() -> {
-            Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                CircularProgressIndicator(color = MupaPalette.CoralPrimary)
-            }
-        }
-        uiState.errorMessage != null && uiState.shelves.isEmpty() -> {
-            Box(modifier = modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                    modifier = Modifier.padding(24.dp),
+    LazyColumn(
+        modifier = modifier.fillMaxSize(),
+        contentPadding = contentPadding,
+        verticalArrangement = Arrangement.spacedBy(MupaSpacing.SectionGap),
+    ) {
+        // Header: glyph + sapaan (wordmark tidak dobel) + indikator sumber tenang
+        item(key = "home_header") {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.weight(1f),
                 ) {
+                    MupaLogoGlyph(size = 26.dp)
                     Text(
-                        text = uiState.errorMessage,
-                        style = MaterialTheme.typography.bodyLarge,
-                        color = MaterialTheme.colorScheme.onSurface,
+                        text = uiState.greeting,
+                        style = MaterialTheme.typography.headlineLarge,
+                        color = MaterialTheme.colorScheme.onBackground,
+                        maxLines = 1,
                     )
-                    OutlinedButton(onClick = onRetry) { Text("Coba Lagi") }
+                }
+                val nextSource = if (uiState.activeSource == AudioSourceType.STREAMING) {
+                    AudioSourceType.LOCAL
+                } else {
+                    AudioSourceType.STREAMING
+                }
+                Row(
+                    modifier = Modifier
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.surfaceContainer)
+                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape)
+                        .clickable(enabled = onToggleSource != null) { onToggleSource?.invoke(nextSource) }
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp),
+                ) {
+                    Icon(
+                        imageVector = if (uiState.activeSource == AudioSourceType.STREAMING) {
+                            Icons.Rounded.Cloud
+                        } else {
+                            Icons.Rounded.Smartphone
+                        },
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(15.dp),
+                    )
+                    Text(
+                        text = if (uiState.activeSource == AudioSourceType.STREAMING) "Awan" else "Lokal",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
                 }
             }
         }
-        else -> {
-            LazyColumn(
-                modifier = modifier.fillMaxSize(),
-                contentPadding = contentPadding,
-                verticalArrangement = Arrangement.spacedBy(22.dp),
-            ) {
-                item(key = "brand_header") {
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        MupaBrandMark(glyphSize = 28.dp)
-                        Text(
-                            text = uiState.greeting,
-                            style = MaterialTheme.typography.headlineMedium,
-                            color = MaterialTheme.colorScheme.onBackground,
+
+        when {
+            uiState.isLoading && uiState.mixHero == null && uiState.shelves.isEmpty() -> {
+                item(key = "home_loading_hero") {
+                    MupaSkeletonBox(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(148.dp),
+                        shape = MupaRadii.Card,
+                    )
+                }
+                item(key = "home_loading_shelf") {
+                    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                        MupaSkeletonBox(modifier = Modifier.width(120.dp).height(20.dp), shape = CircleShape)
+                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                            repeat(3) { MupaCoverCardSkeleton() }
+                        }
+                    }
+                }
+            }
+
+            uiState.errorMessage != null && uiState.mixHero == null && uiState.shelves.isEmpty() -> {
+                item(key = "home_error") {
+                    MupaErrorState(message = uiState.errorMessage, onRetry = onRetry)
+                }
+            }
+
+            uiState.mixHero == null && uiState.shelves.isEmpty() -> {
+                item(key = "home_empty") {
+                    if (uiState.activeSource == AudioSourceType.LOCAL) {
+                        MupaEmptyState(
+                            icon = Icons.Rounded.LibraryMusic,
+                            title = "Pustaka lokal masih kosong",
+                            subtitle = "Import file audio atau folder musik dari perangkatmu untuk mulai meracik Mix Mupa offline.",
+                            actionLabel = "Import Lagu",
+                            onAction = onImportLocalFiles,
+                            secondaryActionLabel = "Import Folder",
+                            onSecondaryAction = onImportLocalFolder,
+                        )
+                    } else {
+                        MupaEmptyState(
+                            icon = Icons.Rounded.Cloud,
+                            title = "Belum ada rekomendasi",
+                            subtitle = "Periksa koneksi internetmu atau muat ulang Beranda.",
+                            actionLabel = "Coba lagi",
+                            onAction = onRetry,
+                        )
+                    }
+                }
+            }
+
+            else -> {
+                // SATU kartu hero Mix Mupa (kolase cover, judul, N lagu, tombol Putar koral, ikon Racik ulang)
+                uiState.mixHero?.takeIf { it.tracks.isNotEmpty() }?.let { hero ->
+                    item(key = "hero_mix_mupa") {
+                        MixMupaHeroCard(
+                            playlist = hero,
+                            onPlay = { onPlayTrack(hero.tracks, 0) },
+                            onReshuffle = onReshuffleMix,
                         )
                     }
                 }
 
-                // Hero Mix Mupa Card
-                val mixShelf = uiState.shelves.firstOrNull { it.id == "shelf_mix_mupa" }
-                if (mixShelf != null && mixShelf.tracks.isNotEmpty()) {
-                    item(key = "hero_mix_mupa") {
-                        MupaGlassSurface(
-                            shape = MupaRadii.Card,
-                            modifier = Modifier.fillMaxWidth(),
-                        ) {
-                            Column(
-                                modifier = Modifier.padding(18.dp),
-                                verticalArrangement = Arrangement.spacedBy(10.dp),
-                            ) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Column(modifier = Modifier.weight(1f)) {
-                                        Text(
-                                            text = "Mix Mupa",
-                                            style = MaterialTheme.typography.titleLarge,
-                                            color = MaterialTheme.colorScheme.onSurface,
-                                        )
-                                        Text(
-                                            text = mixShelf.subtitle.orEmpty(),
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        )
-                                    }
-                                    TextButton(onClick = onReshuffleMix) {
-                                        Icon(
-                                            imageVector = Icons.Rounded.Refresh,
-                                            contentDescription = "Racik ulang Mix Mupa",
-                                            tint = MupaPalette.CoralBright,
-                                            modifier = Modifier.size(18.dp),
-                                        )
-                                        Text(
-                                            text = " Racik ulang",
-                                            color = MupaPalette.CoralBright,
-                                        )
-                                    }
-                                }
-                                Button(
-                                    onClick = { onPlayTrack(mixShelf.tracks, 0) },
-                                    colors = ButtonDefaults.buttonColors(
-                                        containerColor = MupaPalette.CoralPrimary,
-                                        contentColor = MupaPalette.LogoCharcoal,
-                                    ),
-                                ) {
-                                    Text("Putar Mix Mupa (${mixShelf.tracks.size} lagu)")
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // Rak Horizontal (Untukmu, Mix Mupa, Ulangi Lagi, Belum Diputar)
+                // Maksimal 3 shelf tanpa duplikasi (Untukmu, Ulangi lagi, Belum diputar)
                 uiState.shelves.forEach { shelf ->
-                    if (shelf.tracks.isNotEmpty()) {
-                        item(key = shelf.id) {
-                            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                Column {
-                                    Text(
-                                        text = shelf.title,
-                                        style = MaterialTheme.typography.titleLarge,
-                                        color = MaterialTheme.colorScheme.onBackground,
+                    item(key = shelf.id) {
+                        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                            MupaSectionHeader(
+                                title = shelf.title,
+                                subtitle = shelf.subtitle,
+                            )
+                            LazyRow(
+                                horizontalArrangement = Arrangement.spacedBy(14.dp),
+                            ) {
+                                itemsIndexed(
+                                    items = shelf.tracks,
+                                    key = { _, track -> "${shelf.id}_${track.id}" },
+                                ) { index, track ->
+                                    val display = TrackDisplayRules.formatTrack(track, stripArtistName)
+                                    MupaCoverCard(
+                                        title = display.title,
+                                        subtitle = display.subtitle,
+                                        artworkUrl = track.artworkUrl,
+                                        onClick = { onPlayTrack(shelf.tracks, index) },
                                     )
-                                    shelf.subtitle?.let { sub ->
-                                        Text(
-                                            text = sub,
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        )
-                                    }
-                                }
-                                LazyRow(
-                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                ) {
-                                    itemsIndexed(
-                                        items = shelf.tracks,
-                                        key = { idx, track -> "${shelf.id}_${track.id}_$idx" },
-                                    ) { index, track ->
-                                        val display = TrackNameFormatter.format(track, stripArtistName)
-                                        Column(
-                                            modifier = Modifier
-                                                .width(148.dp)
-                                                .clickable { onPlayTrack(shelf.tracks, index) },
-                                            verticalArrangement = Arrangement.spacedBy(6.dp),
-                                        ) {
-                                            TrackArtworkTile(
-                                                track = track,
-                                                modifier = Modifier
-                                                    .size(148.dp)
-                                                    .clip(MupaRadii.ArtworkMedium),
-                                                iconSize = 36.dp,
-                                            )
-                                            Text(
-                                                text = display.title,
-                                                style = MaterialTheme.typography.titleSmall,
-                                                color = MaterialTheme.colorScheme.onSurface,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                            )
-                                            if (display.artist.isNotEmpty()) {
-                                                Text(
-                                                    text = display.artist,
-                                                    style = MaterialTheme.typography.bodySmall,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis,
-                                                )
-                                            }
-                                        }
-                                    }
                                 }
                             }
                         }
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun MixMupaHeroCard(
+    playlist: Playlist,
+    onPlay: () -> Unit,
+    onReshuffle: () -> Unit,
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(MupaRadii.Card)
+            .background(MaterialTheme.colorScheme.surfaceContainer)
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, MupaRadii.Card)
+            .padding(18.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            // Kolase 2x2 sampul
+            MixCoverCollage(
+                artworkUrls = playlist.tracks.map { it.artworkUrl }.take(4),
+            )
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(3.dp),
+            ) {
+                Text(
+                    text = "Mix Mupa",
+                    style = MaterialTheme.typography.titleLarge,
+                    color = MaterialTheme.colorScheme.onSurface,
+                )
+                Text(
+                    text = "${playlist.tracks.size} lagu · ${playlist.subtitle.orEmpty()}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                )
+            }
+            IconButton(
+                onClick = onReshuffle,
+                modifier = Modifier.size(48.dp),
+            ) {
+                Icon(
+                    imageVector = Icons.Rounded.Refresh,
+                    contentDescription = "Racik ulang Mix Mupa",
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(22.dp),
+                )
+            }
+        }
+
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            MupaPrimaryButton(
+                text = "Putar",
+                icon = Icons.Rounded.PlayArrow,
+                onClick = onPlay,
+            )
+            Spacer(modifier = Modifier.weight(1f))
+        }
+    }
+}
+
+@Composable
+private fun MixCoverCollage(
+    artworkUrls: List<String?>,
+    modifier: Modifier = Modifier,
+) {
+    val padded = List(4) { idx -> artworkUrls.getOrNull(idx) }
+    Column(
+        modifier = modifier
+            .size(68.dp)
+            .clip(RoundedCornerShape(14.dp)),
+        verticalArrangement = Arrangement.spacedBy(2.dp),
+    ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+            MupaArtworkBox(artworkUrl = padded[0], contentDescription = null, size = 33.dp, shape = RoundedCornerShape(4.dp), iconSize = 14.dp)
+            MupaArtworkBox(artworkUrl = padded[1], contentDescription = null, size = 33.dp, shape = RoundedCornerShape(4.dp), iconSize = 14.dp)
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+            MupaArtworkBox(artworkUrl = padded[2], contentDescription = null, size = 33.dp, shape = RoundedCornerShape(4.dp), iconSize = 14.dp)
+            MupaArtworkBox(artworkUrl = padded[3], contentDescription = null, size = 33.dp, shape = RoundedCornerShape(4.dp), iconSize = 14.dp)
         }
     }
 }

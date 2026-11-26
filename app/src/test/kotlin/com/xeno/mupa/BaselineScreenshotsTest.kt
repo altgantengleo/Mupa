@@ -8,8 +8,14 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.unit.dp
 import androidx.core.view.drawToBitmap
@@ -18,9 +24,14 @@ import com.xeno.mupa.core.designsystem.theme.MupaAppearance
 import com.xeno.mupa.core.designsystem.theme.MupaTheme
 import com.xeno.mupa.core.model.Artist
 import com.xeno.mupa.core.model.AudioSourceType
+import com.xeno.mupa.core.model.GlassStyle
 import com.xeno.mupa.core.model.Playlist
+import com.xeno.mupa.core.model.ShelfComposer
 import com.xeno.mupa.core.model.Track
 import com.xeno.mupa.core.model.UserPreferences
+import com.xeno.mupa.navigation.MupaFloatingBottomBar
+import com.xeno.mupa.navigation.MupaTopLevelDestination
+import com.xeno.mupa.ui.player.MiniPlayerBar
 import com.xeno.mupa.ui.screens.AccountScreen
 import com.xeno.mupa.ui.screens.HomeScreen
 import com.xeno.mupa.ui.screens.HomeUiState
@@ -39,8 +50,8 @@ import java.io.File
 import java.io.FileOutputStream
 
 /**
- * Screenshot baseline R0 (sebelum redesign Fase 2R) pada JVM memakai Robolectric Native Graphics.
- * Mengonfirmasi secara visual kondisi awal Beranda, Cari, Pustaka, dan Akun di docs/screens/baseline/.
+ * Verifikasi visual R2 (Mupa Calm) pada JVM memakai Robolectric Native Graphics.
+ * Menyimpan hasil ke docs/screens/ untuk diperiksa langsung (bukti B1-B10 & B12).
  */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -50,125 +61,223 @@ class BaselineScreenshotsTest {
     @get:Rule
     val composeRule = createAndroidComposeRule<ComponentActivity>()
 
-    private val baselineTracks = listOf(
-        Track("t1", "blue", "yung kai", durationMs = 0L, sourceType = AudioSourceType.STREAMING),
-        Track("t2", "Blue Oiia", "yung kai", durationMs = 0L, sourceType = AudioSourceType.STREAMING),
-        Track("t3", "Bertaut", "Nadin Amizah", durationMs = 256_000L, sourceType = AudioSourceType.LOCAL, isFavorite = true),
-        Track("t4", "To the Bone", "Pamungkas", durationMs = 344_000L, sourceType = AudioSourceType.LOCAL, isFavorite = true),
+    private val streamingTracks = listOf(
+        Track("s1", "blue", "yung kai", durationMs = 214_000L, sourceType = AudioSourceType.STREAMING),
+        Track("s2", "wildflower", "yung kai", durationMs = 0L, sourceType = AudioSourceType.STREAMING),
+        Track("s3", "Die With A Smile", "Bruno Mars", durationMs = 251_000L, sourceType = AudioSourceType.STREAMING),
+        Track("s4", "Evaluasi", "Hindia", durationMs = 214_000L, sourceType = AudioSourceType.STREAMING),
+        Track("s5", "Satu Bulan", "Bernadya", durationMs = 204_000L, sourceType = AudioSourceType.STREAMING),
     )
 
-    private fun saveBaselinePng(name: String) {
+    private val localTracks = listOf(
+        Track("content://loc/1", "Nadin Amizah - Bertaut (Official Audio)", "Nadin Amizah", albumTitle = "Selamat Ulang Tahun", durationMs = 256_000L, sourceType = AudioSourceType.LOCAL, originalFileName = "Nadin Amizah - Bertaut (Official Audio).flac", isFavorite = true, playCount = 12),
+        Track("content://loc/2", "To the Bone", "Pamungkas", albumTitle = "Flying Solo", durationMs = 344_000L, sourceType = AudioSourceType.LOCAL, originalFileName = "Pamungkas - To the Bone.mp3", isFavorite = true, playCount = 9),
+        Track("content://loc/3", "Dan", "Sheila On 7", albumTitle = "Sheila On 7", durationMs = 286_000L, sourceType = AudioSourceType.LOCAL, originalFileName = "Sheila On 7 - Dan.flac", isFavorite = false, playCount = 0),
+    )
+
+    private fun saveScreenPng(name: String) {
         composeRule.waitForIdle()
-        val dir = File("../docs/screens/baseline").apply { mkdirs() }
+        val dir = File("../docs/screens").apply { mkdirs() }
         val file = File(dir, "$name.png")
         val contentView = composeRule.activity.findViewById<View>(android.R.id.content)
         val bmp = contentView.drawToBitmap(Bitmap.Config.ARGB_8888)
-        // Jangan timpa screenshot baseline R0 jika sudah ada (bukti sebelum Fase 2R)
-        if (!file.exists()) {
-            FileOutputStream(file).use { out ->
-                bmp.compress(Bitmap.CompressFormat.PNG, 100, out)
-            }
+        FileOutputStream(file).use { out ->
+            bmp.compress(Bitmap.CompressFormat.PNG, 100, out)
         }
-        assertTrue("Rendered bitmap must be valid", bmp.width > 0 && bmp.height > 0)
+        assertTrue("Screenshot $name must be valid", file.exists() && file.length() > 1_000L)
     }
 
     @Test
-    fun captureBaselineHome() {
-        val shelf = Playlist("shelf_mix_mupa", "Mix Mupa", "Racikan dari selera artis & pustaka lokalmu", baselineTracks)
+    fun captureR2HomeWithChromeScrim() {
+        val hero = Playlist("shelf_mix_mupa", "Mix Mupa", "Racikan dari yung kai & Bruno Mars", streamingTracks)
+        val shelves = ShelfComposer.compose(
+            listOf(
+                Playlist("shelf_for_you", "Untukmu", "Berdasarkan yung kai, Bruno Mars", streamingTracks.take(3)),
+                Playlist("shelf_repeat", "Ulangi lagi", "Nyaman diputar ulang", streamingTracks.drop(3)),
+            ),
+        )
         composeRule.setContent {
-            MupaTheme(appearance = MupaAppearance()) {
-                Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+            MupaTheme(appearance = MupaAppearance(glassStyle = GlassStyle.SOLID)) {
+                val bg = MaterialTheme.colorScheme.background
+                Box(Modifier.fillMaxSize().background(bg)) {
                     MupaAuroraBackground()
                     HomeScreen(
                         uiState = HomeUiState(
                             greeting = "Selamat sore",
-                            shelves = listOf(
-                                Playlist("shelf_for_you", "Untukmu", "Berdasarkan yung kai, Bruno Mars", baselineTracks),
-                                shelf,
-                            ),
+                            activeSource = AudioSourceType.STREAMING,
+                            mixHero = hero,
+                            shelves = shelves,
                             isLoading = false,
                         ),
                         stripArtistName = true,
-                        contentPadding = PaddingValues(20.dp),
+                        contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 176.dp),
                         onPlayTrack = { _, _ -> },
                         onReshuffleMix = {},
                         onRetry = {},
                     )
+                    // Scrim + solid MiniPlayer + solid BottomBar (bukti B1 & B6)
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .fillMaxWidth()
+                            .height(172.dp)
+                            .background(
+                                Brush.verticalGradient(
+                                    0f to Color.Transparent,
+                                    0.22f to bg.copy(alpha = 0.88f),
+                                    1f to bg.copy(alpha = 0.96f),
+                                ),
+                            ),
+                    )
+                    MiniPlayerBar(
+                        track = streamingTracks.first(),
+                        isPlaying = true,
+                        progressFraction = 0.35f,
+                        onExpand = {},
+                        onTogglePlayPause = {},
+                        onSkipNext = {},
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(start = 20.dp, end = 20.dp, bottom = 84.dp)
+                            .fillMaxWidth()
+                            .height(64.dp),
+                    )
+                    MupaFloatingBottomBar(
+                        currentDestination = MupaTopLevelDestination.HOME,
+                        onSelectDestination = {},
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .padding(horizontal = 20.dp, vertical = 12.dp),
+                    )
                 }
             }
         }
-        saveBaselinePng("r0_home_360dp")
+        saveScreenPng("r2_home_360dp")
     }
 
     @Test
-    fun captureBaselineSearch() {
+    fun captureR2SearchResults() {
         composeRule.setContent {
-            MupaTheme(appearance = MupaAppearance()) {
+            MupaTheme(appearance = MupaAppearance(glassStyle = GlassStyle.SOLID)) {
                 Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
                     MupaAuroraBackground()
                     SearchScreen(
-                        uiState = SearchUiState(results = baselineTracks, isLoading = false),
+                        uiState = SearchUiState(
+                            query = "yung",
+                            source = AudioSourceType.STREAMING,
+                            results = streamingTracks,
+                            isLoading = false,
+                            hasSearched = true,
+                        ),
                         stripArtistName = true,
-                        contentPadding = PaddingValues(20.dp),
+                        currentPlayingTrackId = "s1",
+                        contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 100.dp),
                         onQueryChange = {},
-                        onSelectFilter = {},
+                        onSelectScope = {},
+                        onToggleSource = {},
                         onSubmitQuery = {},
+                        onRemoveRecent = {},
                         onPlayTrack = { _, _ -> },
                         onRetry = {},
                     )
                 }
             }
         }
-        saveBaselinePng("r0_search_360dp")
+        saveScreenPng("r2_search_results_360dp")
     }
 
     @Test
-    fun captureBaselineLibrary() {
+    fun captureR2LibraryStreamingAndLocalEmpty() {
         composeRule.setContent {
-            MupaTheme(appearance = MupaAppearance()) {
+            MupaTheme(appearance = MupaAppearance(glassStyle = GlassStyle.SOLID)) {
                 Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
                     MupaAuroraBackground()
                     LibraryScreen(
                         uiState = LibraryUiState(
-                            favoritesOnly = true,
-                            localOnly = true,
-                            allTracks = baselineTracks,
+                            activeSource = AudioSourceType.LOCAL,
+                            tracks = localTracks,
                             isLoading = false,
                         ),
                         stripArtistName = true,
-                        contentPadding = PaddingValues(20.dp),
-                        onSelectTab = {},
+                        currentPlayingTrackId = null,
+                        contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 100.dp),
+                        onSwitchSource = {},
+                        onOpenCategory = {},
+                        onCloseCategory = {},
                         onSelectSort = {},
-                        onToggleFavoritesOnly = {},
-                        onToggleLocalOnly = {},
+                        onSetFavoritesOnly = {},
+                        onImportLocalFiles = {},
+                        onImportLocalFolder = {},
+                        onRescanFolders = {},
+                        onRemoveLocalTrack = {},
+                        onToggleFavoriteTrack = {},
+                        onCreatePlaylist = {},
                         onPlayTrack = { _, _ -> },
                         onRetry = {},
                     )
                 }
             }
         }
-        saveBaselinePng("r0_library_360dp")
+        saveScreenPng("r2_library_local_filled_360dp")
     }
 
     @Test
-    fun captureBaselineAccount() {
+    fun captureR2LibraryLocalEmpty() {
         composeRule.setContent {
-            MupaTheme(appearance = MupaAppearance()) {
+            MupaTheme(appearance = MupaAppearance(glassStyle = GlassStyle.SOLID)) {
+                Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+                    MupaAuroraBackground()
+                    LibraryScreen(
+                        uiState = LibraryUiState(
+                            activeSource = AudioSourceType.LOCAL,
+                            tracks = emptyList(),
+                            isLoading = false,
+                        ),
+                        stripArtistName = true,
+                        currentPlayingTrackId = null,
+                        contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 100.dp),
+                        onSwitchSource = {},
+                        onOpenCategory = {},
+                        onCloseCategory = {},
+                        onSelectSort = {},
+                        onSetFavoritesOnly = {},
+                        onImportLocalFiles = {},
+                        onImportLocalFolder = {},
+                        onRescanFolders = {},
+                        onRemoveLocalTrack = {},
+                        onToggleFavoriteTrack = {},
+                        onCreatePlaylist = {},
+                        onPlayTrack = { _, _ -> },
+                        onRetry = {},
+                    )
+                }
+            }
+        }
+        saveScreenPng("r2_library_local_empty_360dp")
+    }
+
+    @Test
+    fun captureR2Account() {
+        composeRule.setContent {
+            MupaTheme(appearance = MupaAppearance(glassStyle = GlassStyle.SOLID)) {
                 Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
                     MupaAuroraBackground()
                     AccountScreen(
                         preferences = UserPreferences(),
                         favoriteArtists = listOf(Artist("1", "yung kai"), Artist("2", "Bruno Mars")),
-                        totalTracksCount = 14,
-                        favoriteTracksCount = 8,
-                        contentPadding = PaddingValues(20.dp),
+                        totalTracksCount = 42,
+                        favoriteTracksCount = 12,
+                        contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = 16.dp, bottom = 100.dp),
                         onEditFavoriteArtists = {},
-                        onOpenSettings = {},
+                        onGlassStyleChange = {},
                         onOledModeChange = {},
+                        onAuroraEnabledChange = {},
+                        onPerformanceModeChange = {},
+                        onStripArtistNameChange = {},
                     )
                 }
             }
         }
-        saveBaselinePng("r0_account_360dp")
+        saveScreenPng("r2_account_360dp")
     }
 }
