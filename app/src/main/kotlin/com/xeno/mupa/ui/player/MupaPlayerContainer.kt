@@ -244,36 +244,54 @@ fun MupaPlayerOverlayHost(
             }
         }
 
-        val fullDragDownModifier = Modifier.pointerInput(sheetState, fullHeightPx, sheetOverlayVisible, playerState.isCinemaMode) {
+        // Gestur seret ke bawah aman untuk kembali ke Mini Player (tidak terlalu sensitif, tidak bentrok dengan scroll lirik/seekbar)
+        val safeMinDownDragPx = with(density) { 28.dp.toPx() }
+        val topHeaderSafeZonePx = statusTopPx + with(density) { 108.dp.toPx() }
+        val fullDragDownModifier = Modifier.pointerInput(sheetState, fullHeightPx, sheetOverlayVisible, playerState.isCinemaMode, showInlineLyrics) {
             val velocityTracker = VelocityTracker()
             awaitEachGesture {
                 val down = awaitFirstDown(requireUnconsumed = false)
                 if (sheetState.progress < 0.2f || playerState.isCinemaMode || sheetOverlayVisible) {
                     return@awaitEachGesture
                 }
-                var lastY = down.position.y
+                // Area aman: saat Lirik terbuka hanya pegangan/header atas; saat Cover tampil hanya area atas-cover (bukan area seekbar/kontrol bawah)
+                val maxDragStartY = if (showInlineLyrics) topHeaderSafeZonePx else fullHeightPx * 0.66f
+                if (down.position.y > maxDragStartY) {
+                    return@awaitEachGesture
+                }
+                val startX = down.position.x
+                val startY = down.position.y
+                var lastY = startY
                 velocityTracker.resetTracking()
                 velocityTracker.addPosition(down.uptimeMillis, down.position)
-                var dragStarted = false
                 val dragChange = awaitVerticalTouchSlopOrCancellation(down.id) { change, over ->
                     if (over > 0f) {
                         change.consume()
-                        dragStarted = true
-                        val dy = change.position.y - lastY
-                        lastY = change.position.y
-                        sheetState.onDragStart()
-                        sheetState.onDragDelta(dy)
                     }
                 }
-                if (dragChange != null && dragStarted) {
+                if (dragChange != null) {
+                    var dragStarted = false
                     verticalDrag(dragChange.id) { change ->
+                        val totalDy = change.position.y - startY
+                        val totalDx = kotlin.math.abs(change.position.x - startX)
+                        if (!dragStarted) {
+                            if (totalDy >= safeMinDownDragPx && totalDy > totalDx * 1.35f) {
+                                dragStarted = true
+                                lastY = change.position.y
+                                sheetState.onDragStart()
+                            } else {
+                                return@verticalDrag
+                            }
+                        }
                         change.consume()
                         val dy = change.position.y - lastY
                         lastY = change.position.y
                         velocityTracker.addPosition(change.uptimeMillis, change.position)
                         sheetState.onDragDelta(dy)
                     }
-                    sheetState.onDragEnd(velocityTracker.calculateVelocity().y)
+                    if (dragStarted) {
+                        sheetState.onDragEnd(velocityTracker.calculateVelocity().y)
+                    }
                 }
             }
         }
@@ -438,17 +456,20 @@ fun MupaPlayerOverlayHost(
                             scaleX = breathScale
                             scaleY = breathScale
                         }
-                        .clickable(
-                            enabled = coverLyricsAlpha > 0.5f,
-                            interactionSource = remember { MutableInteractionSource() },
-                            indication = null,
-                        ) {
+                        .then(
                             if (sheetState.isExpanded) {
-                                onOpenOverlay(PlayerOverlayPane.LYRICS)
+                                // Di mode penuh: HAPUS tap/gestur ke mode lirik; seret bawah aman mengembalikan ke Mini Player
+                                fullDragDownModifier
                             } else {
-                                sheetState.expand()
-                            }
-                        },
+                                Modifier.clickable(
+                                    enabled = coverLyricsAlpha > 0.5f,
+                                    interactionSource = remember { MutableInteractionSource() },
+                                    indication = null,
+                                ) {
+                                    sheetState.expand()
+                                }
+                            },
+                        ),
                 ) {
                     MupaArtworkBox(
                         artworkUrl = track.artworkUrl,

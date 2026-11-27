@@ -256,26 +256,41 @@ class LrcLibLyricsProvider(
                 ?.mapNotNull { runCatching { it.jsonObject }.getOrNull() }
         }.orEmpty()
 
-        selectBestCandidate(firstCandidates, request.durationMs)?.let {
+        selectBestCandidate(firstCandidates, request.durationMs, cleanTitle, cleanArtist)?.let {
             return@withContext Result.success(it)
         }
 
-        // 3. Fallback /api/search?q= (lebih toleran untuk metadata YouTube/InnerTube)
+        // 3. Fallback /api/search?q= (judul + artis)
         val qText = listOf(cleanTitle, cleanArtist).filter { it.isNotBlank() }.joinToString(" ")
         val qUrl = "https://lrclib.net/api/search".toHttpUrl().newBuilder()
             .addQueryParameter("q", qText)
             .build()
-        val qBody = executeGet(qUrl.toString())
-            .getOrElse { return@withContext Result.failure(it) }
-        val qCandidates = runCatching { json.parseToJsonElement(qBody).jsonArray }.getOrNull()
-            ?.mapNotNull { runCatching { it.jsonObject }.getOrNull() }
-            ?: return@withContext Result.failure(StreamingError.ParseError("Respons LRCLIB tidak valid"))
+        val qBody = executeGet(qUrl.toString()).getOrNull()
+        val qCandidates = qBody?.let { b ->
+            runCatching { json.parseToJsonElement(b).jsonArray }.getOrNull()
+                ?.mapNotNull { runCatching { it.jsonObject }.getOrNull() }
+        }.orEmpty()
 
-        val chosen = selectBestCandidate(qCandidates, request.durationMs)
-            ?: selectBestCandidate(qCandidates, targetDurationMs = 0L)
-            ?: return@withContext Result.failure(StreamingError.Unavailable("Lirik tidak ditemukan di LRCLIB"))
+        selectBestCandidate(qCandidates, request.durationMs, cleanTitle, cleanArtist)?.let {
+            return@withContext Result.success(it)
+        }
 
-        Result.success(chosen)
+        // 4. Fallback cerdas hanya judul bersih (mengatasi re-upload YouTube seperti "JVKE Golden Hour" oleh channel random)
+        if (cleanArtist.isNotBlank()) {
+            val titleOnlyUrl = "https://lrclib.net/api/search".toHttpUrl().newBuilder()
+                .addQueryParameter("q", cleanTitle)
+                .build()
+            val titleOnlyBody = executeGet(titleOnlyUrl.toString())
+                .getOrElse { return@withContext Result.failure(it) }
+            val titleCandidates = runCatching { json.parseToJsonElement(titleOnlyBody).jsonArray }.getOrNull()
+                ?.mapNotNull { runCatching { it.jsonObject }.getOrNull() }
+                .orEmpty()
+            selectBestCandidate(titleCandidates, request.durationMs, cleanTitle, "")?.let {
+                return@withContext Result.success(it)
+            }
+        }
+
+        Result.failure(StreamingError.Unavailable("Lirik tidak ditemukan di LRCLIB"))
     }
 
     override suspend fun fetchLyrics(
@@ -358,54 +373,64 @@ class LrcLibLyricsProvider(
         internal fun selectBestCandidate(
             candidates: List<JsonObject>,
             targetDurationMs: Long,
+            expectedTitle: String = "",
+            expectedArtist: String = "",
         ): LyricsDocument? {
             if (candidates.isEmpty()) return null
 
-            val matchingDuration = if (targetDurationMs > 0L) {
-                candidates.filter { obj ->
-                    val durSec = obj["duration"]?.jsonPrimitive?.doubleOrNull ?: return@filter false
-                    val candMs = (durSec * 1_000.0).roundToLong()
-                    abs(candMs - targetDurationMs) <= DURATION_TOLERANCE_MS
-                }
-            } else {
-                candidates
-            }
+            val normExpectedTitle = expectedTitle.lowercase().replace(Regex("""[^a-z0-9\s]"""), " ").trim()
+            val normExpectedArtist = expectedArtist.lowercase().replace(Regex("""[^a-z0-9\s]"""), " ").trim()
+            val queryTokens = (normExpectedTitle + " " + normExpectedArtist)
+                .split(Regex("""\s+"""))
+                .filter { it.length >= 2 }
+                .toSet()
 
-            // Prioritas 1: syncedLyrics dalam toleransi +-2 detik
-            for (obj in matchingDuration) {
-                val synced = obj["syncedLyrics"]?.jsonPrimitive?.contentOrNull
-                if (!synced.isNullOrBlank()) {
-                    val parsed = LrcParser.parseDetailed(synced)
-                    if (parsed.lines.isNotEmpty() && parsed.isSynced) {
-                        return LyricsDocument(
-                            lines = parsed.lines,
-                            rawText = synced,
-                            isSynced = true,
-                            providerId = PROVIDER_ID,
-                            providerLabel = "LRCLIB",
-                        )
+            data class ScoredDoc(val doc: LyricsDocument, val score: Int)
+
+            val scored = candidates.mapNotNull { obj ->
+                val doc = candidateToDocument(obj) ?: return@mapNotNull null
+                val candTitle = obj["trackName"]?.jsonPrimitive?.contentOrNull.orEmpty()
+                    .lowercase().replace(Regex("""[^a-z0-9\s]"""), " ").trim()
+                val candArtist = obj["artistName"]?.jsonPrimitive?.contentOrNull.orEmpty()
+                    .lowercase().replace(Regex("""[^a-z0-9\s]"""), " ").trim()
+                val candCombined = "$candTitle $candArtist"
+
+                var score = 0
+                if (doc.isSynced) score += 50
+
+                // Toleransi durasi bertingkat (cocok untuk perbedaan intro/outro YouTube vs studio)
+                if (targetDurationMs > 0L) {
+                    val durSec = obj["duration"]?.jsonPrimitive?.doubleOrNull
+                    if (durSec != null && durSec > 0.0) {
+                        val diffMs = abs((durSec * 1_000.0).roundToLong() - targetDurationMs)
+                        score += when {
+                            diffMs <= DURATION_TOLERANCE_MS -> 35
+                            diffMs <= 6_000L -> 24
+                            diffMs <= 12_000L -> 12
+                            diffMs <= 20_000L -> 0
+                            else -> -25
+                        }
                     }
                 }
-            }
 
-            // Prioritas 2: plainLyrics dalam toleransi +-2 detik
-            for (obj in matchingDuration) {
-                val plain = obj["plainLyrics"]?.jsonPrimitive?.contentOrNull
-                if (!plain.isNullOrBlank()) {
-                    val parsed = LrcParser.parseDetailed(plain)
-                    if (parsed.lines.isNotEmpty()) {
-                        return LyricsDocument(
-                            lines = parsed.lines,
-                            rawText = plain,
-                            isSynced = parsed.isSynced,
-                            providerId = PROVIDER_ID,
-                            providerLabel = "LRCLIB",
-                        )
-                    }
+                // Kecocokan judul & artis berbasis token
+                if (queryTokens.isNotEmpty()) {
+                    val hits = queryTokens.count { candCombined.contains(it) }
+                    val ratio = hits.toFloat() / queryTokens.size.toFloat()
+                    if (ratio < 0.35f) return@mapNotNull null
+                    score += (ratio * 50f).toInt()
                 }
+                if (normExpectedTitle.isNotEmpty() && (candTitle == normExpectedTitle || normExpectedTitle.contains(candTitle))) {
+                    score += 20
+                }
+                if (normExpectedArtist.isNotEmpty() && (candArtist.contains(normExpectedArtist) || normExpectedArtist.contains(candArtist))) {
+                    score += 20
+                }
+
+                ScoredDoc(doc, score)
             }
 
-            return null
+            return scored.maxByOrNull { it.score }?.doc
         }
 
         private fun candidateToDocument(obj: JsonObject): LyricsDocument? {
