@@ -19,6 +19,7 @@ import androidx.navigation.compose.composable
 import com.xeno.mupa.core.designsystem.theme.MupaMotion
 import com.xeno.mupa.core.model.AudioSourceType
 import com.xeno.mupa.core.model.GlassStyle
+import com.xeno.mupa.core.model.QueueSource
 import com.xeno.mupa.core.model.Track
 import com.xeno.mupa.data.local.LocalImportRules
 import com.xeno.mupa.playback.eq.EqPreset
@@ -52,6 +53,7 @@ fun MupaNavHost(
     contentPadding: PaddingValues,
     onPlayTracks: (List<Track>, Int) -> Unit,
     onPlayFromSearch: (Track) -> Unit = { onPlayTracks(listOf(it), 0) },
+    onPlayShuffled: (List<Track>, QueueSource) -> Unit = { tracks, _ -> onPlayTracks(tracks, 0) },
     onActiveSourceChange: (AudioSourceType) -> Unit,
     onImportLocalFiles: (List<android.net.Uri>) -> Unit,
     onImportLocalFolder: (android.net.Uri) -> Unit,
@@ -202,6 +204,7 @@ fun MupaNavHost(
                 onToggleFavoriteTrack = vm::toggleLocalFavorite,
                 onCreatePlaylist = vm::createPlaylist,
                 onPlayTrack = onPlayTracks,
+                onPlayShuffled = onPlayShuffled,
                 onRetry = vm::retry,
             )
         }

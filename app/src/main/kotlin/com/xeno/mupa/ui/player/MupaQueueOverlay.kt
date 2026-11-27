@@ -70,6 +70,7 @@ fun MupaQueueOverlay(
     queue: List<Track>,
     currentIndex: Int,
     stripArtistName: Boolean = true,
+    queueSourceLabel: String? = null,
     onSelectIndex: (Int) -> Unit,
     onMoveItem: (Int, Int) -> Unit,
     onRemoveItem: (Int) -> Unit,
@@ -117,6 +118,9 @@ fun MupaQueueOverlay(
                     color = MaterialTheme.colorScheme.onSurface,
                 )
                 val summary = buildString {
+                    if (!queueSourceLabel.isNullOrBlank()) {
+                        append("$queueSourceLabel · ")
+                    }
                     append("${queue.size} lagu")
                     if (!totalDurationLabel.isNullOrBlank()) {
                         append(" · $totalDurationLabel")

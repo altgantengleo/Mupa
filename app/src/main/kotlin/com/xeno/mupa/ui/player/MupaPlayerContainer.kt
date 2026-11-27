@@ -481,6 +481,7 @@ fun MupaPlayerOverlayHost(
                         queue = playerState.queue,
                         currentIndex = playerState.currentIndex,
                         stripArtistName = stripArtistName,
+                        queueSourceLabel = playerState.queueSource.displayLabel,
                         onSelectIndex = onSelectQueueIndex,
                         onMoveItem = onMoveQueueItem,
                         onRemoveItem = onRemoveQueueItem,
@@ -748,16 +749,22 @@ internal fun FullNowPlayingContent(
                     )
                 }
 
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Column(
+                    modifier = Modifier.weight(1f).padding(horizontal = 8.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                ) {
                     Text(
-                        text = "Sedang diputar",
+                        text = playerState.queueSource.displayLabel,
                         style = MaterialTheme.typography.labelMedium,
-                        color = MupaPalette.LogoCream.copy(alpha = 0.72f),
+                        color = MupaPalette.LogoCream.copy(alpha = 0.85f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                     )
                     Text(
                         text = disp.sourceLabel,
                         style = MaterialTheme.typography.labelSmall,
                         color = MupaPalette.CoralSoft,
+                        maxLines = 1,
                     )
                 }
 

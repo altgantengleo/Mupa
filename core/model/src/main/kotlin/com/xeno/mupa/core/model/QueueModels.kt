@@ -188,6 +188,102 @@ object SmartQueueFilter {
                 recentArtists.removeFirst()
             }
         }
+        // Perbaikan ekor: jika 2 item terakhir masih artis sama (terjebak di akhir), pindahkan ke slot aman lebih awal
+        if (maxConsecutive == 1 && out.size >= 3) {
+            val lastIdx = out.lastIndex
+            val lastArtist = normalizeArtist(out[lastIdx].artistName)
+            if (lastArtist.isNotEmpty() && lastArtist == normalizeArtist(out[lastIdx - 1].artistName)) {
+                val tailItem = out.removeAt(lastIdx)
+                val insertAt = (1 until out.size).firstOrNull { idx ->
+                    normalizeArtist(out[idx - 1].artistName) != lastArtist &&
+                        normalizeArtist(out[idx].artistName) != lastArtist
+                } ?: if (initialTrailingArtists.lastOrNull() != lastArtist && normalizeArtist(out[0].artistName) != lastArtist) {
+                    0
+                } else {
+                    out.size
+                }
+                out.add(insertAt, tailItem)
+            }
+        }
         return out
+    }
+}
+
+/**
+ * Mesin Shuffle deterministik berbasis seed (Fase 2T — B):
+ * - Hanya mengacak ITEM BERIKUTNYA; lagu aktif (currentIndex) dan riwayat sebelumnya tetap utuh
+ *   sehingga tombol "Sebelumnya" selalu kembali ke lagu yang benar.
+ * - Mematikan shuffle mengembalikan urutan asli untuk sisa antrean dari posisi sekarang.
+ * - Item lanjutan radio saat shuffle aktif disisipkan secara acak sambil menghindari 2 lagu berurutan
+ *   dari artis yang sama bila memungkinkan.
+ */
+object SmartShuffleEngine {
+
+    fun shuffleUpcoming(
+        queue: List<Track>,
+        currentIndex: Int,
+        seed: Long,
+    ): List<Track> {
+        if (queue.size <= 1 || currentIndex !in queue.indices) return queue
+        val prefix = queue.subList(0, currentIndex + 1)
+        val upcoming = queue.subList(currentIndex + 1, queue.size).toMutableList()
+        if (upcoming.size <= 1) return queue
+        upcoming.shuffle(kotlin.random.Random(seed))
+        val trailing = listOf(SmartQueueFilter.normalizeArtist(queue[currentIndex].artistName))
+        val spaced = SmartQueueFilter.softenArtistStreaks(
+            tracks = upcoming,
+            initialTrailingArtists = trailing,
+            maxConsecutive = 1,
+        )
+        return prefix + spaced
+    }
+
+    fun unshuffleRemaining(
+        currentQueue: List<Track>,
+        originalOrder: List<Track>,
+        currentIndex: Int,
+    ): List<Track> {
+        if (currentQueue.isEmpty() || currentIndex !in currentQueue.indices) return currentQueue
+        val prefix = currentQueue.subList(0, currentIndex + 1)
+        val prefixIds = prefix.map { it.id }.toSet()
+        val remainingOriginal = originalOrder.filter { it.id !in prefixIds }
+        val remainingOriginalIds = remainingOriginal.map { it.id }.toSet()
+        // Pertahankan item lanjutan baru (radio) yang mungkin belum ada di originalOrder
+        val extras = currentQueue.drop(currentIndex + 1).filter { it.id !in prefixIds && it.id !in remainingOriginalIds }
+        return prefix + remainingOriginal + extras
+    }
+
+    fun insertShuffledContinuation(
+        currentQueue: List<Track>,
+        currentIndex: Int,
+        incoming: List<Track>,
+        seed: Long,
+    ): List<Track> {
+        if (incoming.isEmpty()) return currentQueue
+        if (currentQueue.isEmpty() || currentIndex !in currentQueue.indices) return incoming
+        val prefix = currentQueue.subList(0, currentIndex + 1)
+        val upcoming = (currentQueue.subList(currentIndex + 1, currentQueue.size) + incoming).toMutableList()
+        upcoming.shuffle(kotlin.random.Random(seed xor incoming.size.toLong()))
+        val trailing = listOf(SmartQueueFilter.normalizeArtist(currentQueue[currentIndex].artistName))
+        val spaced = SmartQueueFilter.softenArtistStreaks(
+            tracks = upcoming,
+            initialTrailingArtists = trailing,
+            maxConsecutive = 1,
+        )
+        return prefix + spaced
+    }
+
+    fun buildShuffledStart(
+        tracks: List<Track>,
+        seed: Long,
+    ): List<Track> {
+        if (tracks.size <= 1) return tracks
+        val copy = tracks.toMutableList()
+        copy.shuffle(kotlin.random.Random(seed))
+        return SmartQueueFilter.softenArtistStreaks(
+            tracks = copy,
+            initialTrailingArtists = emptyList(),
+            maxConsecutive = 1,
+        )
     }
 }

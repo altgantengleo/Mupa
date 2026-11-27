@@ -21,6 +21,7 @@ import com.xeno.mupa.core.designsystem.theme.UltraDynamicPaletteCache
 import com.xeno.mupa.core.model.AudioSourceType
 import com.xeno.mupa.core.model.QueueSource
 import com.xeno.mupa.core.model.SmartQueueFilter
+import com.xeno.mupa.core.model.SmartShuffleEngine
 import com.xeno.mupa.core.model.Track
 import java.io.File
 import com.xeno.mupa.data.local.LocalLibraryRepository
@@ -501,8 +502,17 @@ class MupaPlayerViewModel @Inject constructor(
                     recentTrackIds = current.recentPlayedIds.toSet(),
                 )
                 if (filtered.isNotEmpty()) {
-                    val newQueue = current.queue + filtered
                     val newOriginal = current.originalQueueOrder + filtered
+                    val newQueue = if (current.isShuffleEnabled) {
+                        SmartShuffleEngine.insertShuffledContinuation(
+                            currentQueue = current.queue,
+                            currentIndex = current.currentIndex,
+                            incoming = filtered,
+                            seed = current.shuffleSeed.takeIf { it != 0L } ?: System.nanoTime(),
+                        )
+                    } else {
+                        current.queue + filtered
+                    }
                     _uiState.update {
                         it.copy(
                             queue = newQueue,
@@ -513,7 +523,11 @@ class MupaPlayerViewModel @Inject constructor(
                         )
                     }
                     withController { ctrl ->
-                        ctrl.addMediaItems(toMediaItems(filtered))
+                        if (current.isShuffleEnabled) {
+                            syncUpcomingControllerItems(ctrl, newQueue, current.currentIndex)
+                        } else {
+                            ctrl.addMediaItems(toMediaItems(filtered))
+                        }
                     }
                     persistCurrentQueue()
                 } else {
@@ -623,10 +637,89 @@ class MupaPlayerViewModel @Inject constructor(
         extractUltraDynamicForTrack(track)
     }
 
+    fun playShuffled(
+        tracks: List<Track>,
+        source: QueueSource? = null,
+    ) {
+        if (tracks.isEmpty()) return
+        val seed = System.nanoTime()
+        val shuffled = SmartShuffleEngine.buildShuffledStart(tracks, seed)
+        val first = shuffled.first()
+        val resolvedSource = source ?: if (first.sourceType == AudioSourceType.LOCAL) {
+            QueueSource.Local()
+        } else {
+            QueueSource.PlaylistOrAlbum("shuffled", "Daftar Acak")
+        }
+        playQueue(shuffled, 0, resolvedSource)
+        _uiState.update {
+            it.copy(
+                isShuffleEnabled = true,
+                shuffleSeed = seed,
+                originalQueueOrder = tracks,
+            )
+        }
+        persistCurrentQueue()
+    }
+
     fun toggleShuffle() {
-        val next = !_uiState.value.isShuffleEnabled
-        _uiState.update { it.copy(isShuffleEnabled = next) }
-        withController { it.shuffleModeEnabled = next }
+        val state = _uiState.value
+        if (state.queue.isEmpty()) return
+        val next = !state.isShuffleEnabled
+        if (next) {
+            val seed = System.nanoTime()
+            val original = state.originalQueueOrder.ifEmpty { state.queue }
+            val shuffled = SmartShuffleEngine.shuffleUpcoming(
+                queue = state.queue,
+                currentIndex = state.currentIndex,
+                seed = seed,
+            )
+            _uiState.update {
+                it.copy(
+                    queue = shuffled,
+                    originalQueueOrder = original,
+                    isShuffleEnabled = true,
+                    shuffleSeed = seed,
+                )
+            }
+            withController { ctrl ->
+                ctrl.shuffleModeEnabled = false // Urutan acak deterministik dikelola langsung di daftar antrean
+                syncUpcomingControllerItems(ctrl, shuffled, state.currentIndex)
+            }
+        } else {
+            val restored = SmartShuffleEngine.unshuffleRemaining(
+                currentQueue = state.queue,
+                originalOrder = state.originalQueueOrder.ifEmpty { state.queue },
+                currentIndex = state.currentIndex,
+            )
+            _uiState.update {
+                it.copy(
+                    queue = restored,
+                    isShuffleEnabled = false,
+                )
+            }
+            withController { ctrl ->
+                ctrl.shuffleModeEnabled = false
+                syncUpcomingControllerItems(ctrl, restored, state.currentIndex)
+            }
+        }
+        persistCurrentQueue()
+    }
+
+    /** Memperbarui item sesudah currentIndex di MediaController tanpa memotong lagu yang sedang diputar. */
+    private fun syncUpcomingControllerItems(
+        ctrl: MediaController,
+        newQueue: List<Track>,
+        currentIndex: Int,
+    ) {
+        if (currentIndex !in newQueue.indices) return
+        val start = currentIndex + 1
+        val existingCount = ctrl.mediaItemCount
+        val upcomingItems = toMediaItems(newQueue.drop(start))
+        if (existingCount > start) {
+            ctrl.replaceMediaItems(start, existingCount, upcomingItems)
+        } else if (existingCount == start && upcomingItems.isNotEmpty()) {
+            ctrl.addMediaItems(upcomingItems)
+        }
     }
 
     fun cycleRepeatMode() {

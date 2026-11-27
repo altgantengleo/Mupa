@@ -39,7 +39,10 @@ import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material.icons.rounded.Tune
+import androidx.compose.ui.platform.testTag
+import com.xeno.mupa.core.model.QueueSource
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
@@ -312,6 +315,7 @@ fun LibraryScreen(
     onCreatePlaylist: (String) -> Unit,
     onPlayTrack: (List<Track>, Int) -> Unit,
     onRetry: () -> Unit,
+    onPlayShuffled: ((List<Track>, QueueSource) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     var showFilterSheet by remember { mutableStateOf(false) }
@@ -376,6 +380,7 @@ fun LibraryScreen(
             onRemoveLocalTrack = onRemoveLocalTrack,
             onToggleFavoriteTrack = onToggleFavoriteTrack,
             onPlayTrack = onPlayTrack,
+            onPlayShuffled = onPlayShuffled,
             modifier = modifier,
         )
         return
@@ -734,6 +739,7 @@ private fun LibraryCategoryDetailList(
     onRemoveLocalTrack: (String) -> Unit,
     onToggleFavoriteTrack: (String) -> Unit,
     onPlayTrack: (List<Track>, Int) -> Unit,
+    onPlayShuffled: ((List<Track>, QueueSource) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val tracks = uiState.tracksForOpenCategory()
@@ -776,11 +782,41 @@ private fun LibraryCategoryDetailList(
                     }
                 }
                 // SATU tombol Urutkan/Filter yang membuka MupaFilterSheet (bukan 3 baris chip)
-                MupaSecondaryButton(
-                    text = "Urutkan",
-                    icon = Icons.Rounded.Tune,
-                    onClick = onOpenFilter,
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    if (tracks.isNotEmpty()) {
+                        IconButton(
+                            onClick = {
+                                val source = if (uiState.activeSource == AudioSourceType.LOCAL) {
+                                    QueueSource.Local(category.label)
+                                } else {
+                                    QueueSource.PlaylistOrAlbum(category.name.lowercase(), category.label)
+                                }
+                                if (onPlayShuffled != null) {
+                                    onPlayShuffled(tracks, source)
+                                } else {
+                                    onPlayTrack(tracks, 0)
+                                }
+                            },
+                            modifier = Modifier
+                                .size(44.dp)
+                                .testTag("library_shuffle_button"),
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.Shuffle,
+                                contentDescription = "Acak ${category.label}",
+                                tint = MupaPalette.CoralPrimary,
+                            )
+                        }
+                    }
+                    MupaSecondaryButton(
+                        text = "Urutkan",
+                        icon = Icons.Rounded.Tune,
+                        onClick = onOpenFilter,
+                    )
+                }
             }
         }
 
