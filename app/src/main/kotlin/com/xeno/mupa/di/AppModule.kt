@@ -28,6 +28,7 @@ import com.xeno.mupa.playback.QueuePersistenceStore
 import com.xeno.mupa.playback.eq.FiveBandEqualizerProcessor
 import com.xeno.mupa.streaming.aggregator.MultiProviderCatalogAggregator
 import com.xeno.mupa.streaming.aggregator.ProviderRegistry
+import com.xeno.mupa.streaming.aggregator.providers.AudiusCatalogProvider
 import com.xeno.mupa.streaming.aggregator.providers.DeezerCatalogProvider
 import com.xeno.mupa.streaming.aggregator.providers.ItunesCatalogProvider
 import com.xeno.mupa.streaming.api.StreamingLyricsProvider
@@ -107,12 +108,18 @@ object AppInfrastructureModule {
 
     @Provides
     @Singleton
+    fun provideAudiusCatalogProvider(client: OkHttpClient): AudiusCatalogProvider =
+        AudiusCatalogProvider(client)
+
+    @Provides
+    @Singleton
     fun provideMultiProviderCatalogAggregator(
         deezer: DeezerCatalogProvider,
         itunes: ItunesCatalogProvider,
         innerTube: InnerTubeProvider,
+        audius: AudiusCatalogProvider,
     ): MultiProviderCatalogAggregator = MultiProviderCatalogAggregator(
-        providers = listOf(deezer, itunes, innerTube),
+        providers = listOf(deezer, itunes, innerTube, audius),
     )
 
     @Provides

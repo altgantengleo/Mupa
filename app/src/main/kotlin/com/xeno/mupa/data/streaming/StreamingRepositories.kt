@@ -200,7 +200,7 @@ class StreamingMusicSource @Inject constructor(
             }
             AudioSourceType.STREAMING -> {
                 val effectiveQuery = if (trimmed.length < 2) "Lagu Pop Indonesia" else trimmed
-                catalogAggregator.searchTracksMerged(effectiveQuery, limit = 30)
+                catalogAggregator.searchTracksMerged(effectiveQuery, limit = 60)
                     .onSuccess { list ->
                         list.forEach { cachedStreamingCollection[it.id] = it }
                     }

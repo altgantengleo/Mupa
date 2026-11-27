@@ -39,7 +39,7 @@ class DeezerCatalogProvider(
             val trimmed = query.trim()
             if (trimmed.isEmpty()) return@withContext Result.success(emptyList())
             val encoded = URLEncoder.encode(trimmed, "UTF-8")
-            val url = "$baseUrl/search?q=$encoded&limit=${limit.coerceIn(1, 30)}"
+            val url = "$baseUrl/search?q=$encoded&limit=${limit.coerceIn(1, 50)}"
             fetchJson(url).fold(
                 onSuccess = { parseTracksResponse(it, limit) },
                 onFailure = { Result.failure(it) },
@@ -62,14 +62,64 @@ class DeezerCatalogProvider(
         withContext(Dispatchers.IO) {
             val numericId = artistId.removePrefix("dz_artist_").takeIf { it.all(Char::isDigit) && it.isNotEmpty() }
             if (numericId != null) {
-                val url = "$baseUrl/artist/$numericId/top?limit=12"
+                val url = "$baseUrl/artist/$numericId/top?limit=25"
                 val byId = fetchJson(url).fold(
-                    onSuccess = { parseTracksResponse(it, 12) },
+                    onSuccess = { parseTracksResponse(it, 25) },
                     onFailure = { Result.failure(it) },
                 )
                 if (byId.getOrNull()?.isNotEmpty() == true) return@withContext byId
             }
-            searchTracks(artistName, limit = 12)
+            searchTracks(artistName, limit = 25)
+        }
+
+    suspend fun searchAlbums(query: String, limit: Int = 15): Result<List<com.xeno.mupa.streaming.aggregator.CatalogRelease>> =
+        withContext(Dispatchers.IO) {
+            val trimmed = query.trim()
+            if (trimmed.isEmpty()) return@withContext Result.success(emptyList())
+            val encoded = URLEncoder.encode(trimmed, "UTF-8")
+            val url = "$baseUrl/search/album?q=$encoded&limit=${limit.coerceIn(1, 25)}"
+            fetchJson(url).fold(
+                onSuccess = { parseAlbumsResponse(it, defaultArtistName = null, limit = limit) },
+                onFailure = { Result.failure(it) },
+            )
+        }
+
+    suspend fun getArtistAlbums(artistId: String, artistName: String, limit: Int = 16): Result<List<com.xeno.mupa.streaming.aggregator.CatalogRelease>> =
+        withContext(Dispatchers.IO) {
+            val numericId = artistId.removePrefix("dz_artist_").takeIf { it.all(Char::isDigit) && it.isNotEmpty() }
+                ?: run {
+                    // Cari ID Deezer artis berdasarkan nama bila berasal dari provider lain
+                    val found = searchArtists(artistName, limit = 3).getOrNull()
+                        ?.firstOrNull { it.name.equals(artistName, ignoreCase = true) }
+                        ?: return@withContext searchAlbums(artistName, limit)
+                    found.id.removePrefix("dz_artist_").takeIf { it.all(Char::isDigit) && it.isNotEmpty() }
+                        ?: return@withContext searchAlbums(artistName, limit)
+                }
+            val url = "$baseUrl/artist/$numericId/albums?limit=${limit.coerceIn(1, 25)}"
+            fetchJson(url).fold(
+                onSuccess = { parseAlbumsResponse(it, defaultArtistName = artistName, limit = limit) },
+                onFailure = { Result.failure(it) },
+            )
+        }
+
+    suspend fun getAlbumTracks(albumId: String, albumTitle: String, albumArtworkUrl: String?): Result<List<Track>> =
+        withContext(Dispatchers.IO) {
+            val numericId = albumId.removePrefix("dz_album_").takeIf { it.all(Char::isDigit) && it.isNotEmpty() }
+                ?: return@withContext Result.failure(StreamingError.Unavailable("ID album Deezer tidak valid"))
+            val url = "$baseUrl/album/$numericId/tracks?limit=50"
+            fetchJson(url).fold(
+                onSuccess = { raw ->
+                    parseTracksResponse(raw, 50).map { list ->
+                        list.map { track ->
+                            track.copy(
+                                albumTitle = track.albumTitle ?: albumTitle,
+                                artworkUrl = track.artworkUrl ?: albumArtworkUrl,
+                            )
+                        }
+                    }
+                },
+                onFailure = { Result.failure(it) },
+            )
         }
 
     override suspend fun getTrendingArtists(limit: Int): Result<List<Artist>> =
@@ -162,6 +212,46 @@ class DeezerCatalogProvider(
                 )
             }.distinctBy { it.name.lowercase() }.take(limit)
             return Result.success(artists)
+        }
+
+        fun parseAlbumsResponse(
+            rawJson: String,
+            defaultArtistName: String?,
+            limit: Int = 16,
+        ): Result<List<com.xeno.mupa.streaming.aggregator.CatalogRelease>> {
+            val root = runCatching { json.parseToJsonElement(rawJson).jsonObject }
+                .getOrElse { return Result.failure(StreamingError.ParseError("JSON album Deezer tidak valid", it)) }
+            val data = root["data"]?.asArr().orEmpty()
+            val releases = data.mapNotNull { item ->
+                val obj = item.asObj() ?: return@mapNotNull null
+                val id = obj["id"]?.asStr()?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                val title = obj["title"]?.asStr()?.trim()?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                val artistName = obj["artist"]?.asObj()?.get("name")?.asStr()?.trim()?.takeIf { it.isNotBlank() }
+                    ?: defaultArtistName
+                    ?: "Artis"
+                val cover = obj["cover_xl"]?.asStr()
+                    ?: obj["cover_big"]?.asStr()
+                    ?: obj["cover_medium"]?.asStr()
+                val rawType = obj["record_type"]?.asStr()?.lowercase().orEmpty()
+                val releaseType = when (rawType) {
+                    "ep" -> "EP"
+                    "single" -> "Single"
+                    "compile", "compilation" -> "Kompilasi"
+                    else -> "Album"
+                }
+                val year = obj["release_date"]?.asStr()?.take(4)?.takeIf { it.length == 4 && it.all(Char::isDigit) }
+                val nbTracks = obj["nb_tracks"]?.asInt() ?: 0
+                com.xeno.mupa.streaming.aggregator.CatalogRelease(
+                    id = "dz_album_$id",
+                    title = title,
+                    artistName = artistName,
+                    artworkUrl = cover?.takeIf { it.startsWith("http") },
+                    releaseType = releaseType,
+                    releaseYear = year,
+                    trackCount = nbTracks,
+                )
+            }.distinctBy { "${it.title.lowercase()}|${it.artistName.lowercase()}" }.take(limit)
+            return Result.success(releases)
         }
 
         private fun JsonElement.asObj(): JsonObject? = this as? JsonObject

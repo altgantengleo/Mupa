@@ -40,9 +40,32 @@ class ItunesCatalogProvider(
             val trimmed = query.trim()
             if (trimmed.isEmpty()) return@withContext Result.success(emptyList())
             val encoded = URLEncoder.encode(trimmed, "UTF-8")
-            val url = "$baseUrl/search?term=$encoded&country=$countryCode&media=music&entity=song&limit=${limit.coerceIn(1, 25)}"
+            val url = "$baseUrl/search?term=$encoded&country=$countryCode&media=music&entity=song&limit=${limit.coerceIn(1, 50)}"
             fetchJson(url).fold(
                 onSuccess = { parseTracksResponse(it, limit) },
+                onFailure = { Result.failure(it) },
+            )
+        }
+
+    suspend fun searchAlbums(query: String, limit: Int = 15): Result<List<com.xeno.mupa.streaming.aggregator.CatalogRelease>> =
+        withContext(Dispatchers.IO) {
+            val trimmed = query.trim()
+            if (trimmed.isEmpty()) return@withContext Result.success(emptyList())
+            val encoded = URLEncoder.encode(trimmed, "UTF-8")
+            val url = "$baseUrl/search?term=$encoded&country=$countryCode&media=music&entity=album&limit=${limit.coerceIn(1, 25)}"
+            fetchJson(url).fold(
+                onSuccess = { parseAlbumsResponse(it, limit) },
+                onFailure = { Result.failure(it) },
+            )
+        }
+
+    suspend fun getAlbumTracks(collectionId: String): Result<List<Track>> =
+        withContext(Dispatchers.IO) {
+            val numericId = collectionId.removePrefix("it_album_").takeIf { it.all(Char::isDigit) && it.isNotEmpty() }
+                ?: return@withContext Result.failure(StreamingError.Unavailable("ID album iTunes tidak valid"))
+            val url = "$baseUrl/lookup?id=$numericId&entity=song&country=$countryCode"
+            fetchJson(url).fold(
+                onSuccess = { parseTracksResponse(it, 50) },
                 onFailure = { Result.failure(it) },
             )
         }
@@ -162,6 +185,42 @@ class ItunesCatalogProvider(
                 if (artists.size >= limit) break
             }
             return Result.success(artists)
+        }
+
+        fun parseAlbumsResponse(
+            rawJson: String,
+            limit: Int = 15,
+        ): Result<List<com.xeno.mupa.streaming.aggregator.CatalogRelease>> {
+            val root = runCatching { json.parseToJsonElement(rawJson).jsonObject }
+                .getOrElse { return Result.failure(StreamingError.ParseError("JSON album iTunes tidak valid", it)) }
+            val results = root["results"]?.asArr().orEmpty()
+            val releases = results.mapNotNull { item ->
+                val obj = item.asObj() ?: return@mapNotNull null
+                val collectionId = obj["collectionId"]?.asStr()?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                val rawName = obj["collectionName"]?.asStr()?.trim()?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                val artistName = obj["artistName"]?.asStr()?.trim()?.takeIf { it.isNotBlank() } ?: "Artis"
+                val artwork = upscaleArtwork(obj["artworkUrl100"]?.asStr() ?: obj["artworkUrl60"]?.asStr())
+                val trackCount = obj["trackCount"]?.asStr()?.toIntOrNull() ?: 0
+                val releaseYear = obj["releaseDate"]?.asStr()?.take(4)?.takeIf { it.length == 4 && it.all(Char::isDigit) }
+                val releaseType = when {
+                    rawName.endsWith("- Single", ignoreCase = true) || trackCount == 1 -> "Single"
+                    rawName.endsWith("- EP", ignoreCase = true) || trackCount in 2..6 -> "EP"
+                    else -> "Album"
+                }
+                val cleanTitle = rawName
+                    .replace(Regex("""\s*-\s*(Single|EP)$""", RegexOption.IGNORE_CASE), "")
+                    .trim()
+                com.xeno.mupa.streaming.aggregator.CatalogRelease(
+                    id = "it_album_$collectionId",
+                    title = cleanTitle.ifEmpty { rawName },
+                    artistName = artistName,
+                    artworkUrl = artwork,
+                    releaseType = releaseType,
+                    releaseYear = releaseYear,
+                    trackCount = trackCount,
+                )
+            }.distinctBy { "${it.title.lowercase()}|${it.artistName.lowercase()}" }.take(limit)
+            return Result.success(releases)
         }
 
         private fun JsonElement.asObj(): JsonObject? = this as? JsonObject
