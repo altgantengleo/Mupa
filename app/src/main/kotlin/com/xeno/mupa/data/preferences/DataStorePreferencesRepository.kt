@@ -5,6 +5,7 @@ import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.emptyPreferences
+import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import com.xeno.mupa.core.domain.PreferencesRepository
@@ -48,6 +49,7 @@ class DataStorePreferencesRepository @Inject constructor(
                 isPerformanceMode = prefs[KEY_PERFORMANCE_MODE] ?: false,
                 stripArtistName = prefs[KEY_STRIP_ARTIST_NAME] ?: true,
                 activeSource = activeSource,
+                crossfadeSeconds = (prefs[KEY_CROSSFADE_SECONDS] ?: 5).coerceIn(0, 12),
             )
         }
 
@@ -101,6 +103,12 @@ class DataStorePreferencesRepository @Inject constructor(
         }
     }
 
+    override suspend fun setCrossfadeSeconds(seconds: Int) {
+        dataStore.edit { prefs ->
+            prefs[KEY_CROSSFADE_SECONDS] = seconds.coerceIn(0, 12)
+        }
+    }
+
     private companion object {
         val KEY_ONBOARDING_COMPLETED = booleanPreferencesKey("onboarding_completed")
         val KEY_FAVORITE_ARTIST_IDS = stringSetPreferencesKey("favorite_artist_ids")
@@ -111,5 +119,6 @@ class DataStorePreferencesRepository @Inject constructor(
         val KEY_PERFORMANCE_MODE = booleanPreferencesKey("performance_mode")
         val KEY_STRIP_ARTIST_NAME = booleanPreferencesKey("strip_artist_name")
         val KEY_ACTIVE_SOURCE = stringPreferencesKey("active_source")
+        val KEY_CROSSFADE_SECONDS = intPreferencesKey("crossfade_seconds")
     }
 }

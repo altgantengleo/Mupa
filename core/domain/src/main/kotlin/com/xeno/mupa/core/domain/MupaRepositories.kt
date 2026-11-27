@@ -53,4 +53,5 @@ interface PreferencesRepository {
     suspend fun setPerformanceMode(enabled: Boolean)
     suspend fun setStripArtistName(enabled: Boolean)
     suspend fun setActiveSource(source: AudioSourceType)
+    suspend fun setCrossfadeSeconds(seconds: Int) = Unit
 }

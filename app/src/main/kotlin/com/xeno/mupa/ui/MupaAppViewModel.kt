@@ -19,6 +19,7 @@ import com.xeno.mupa.core.model.UserPreferences
 import com.xeno.mupa.data.backup.MupaBackupCodec
 import com.xeno.mupa.data.local.LocalLibraryRepository
 import com.xeno.mupa.data.local.db.LyricsCacheDao
+import com.xeno.mupa.playback.MupaCrossfadeConfig
 import com.xeno.mupa.playback.eq.EqPreset
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -77,6 +78,7 @@ class MupaAppViewModel @Inject constructor(
             ) { prefs, localTracks, folders ->
                 Triple(prefs, localTracks, folders)
             }.collect { (prefs, localTracks, folders) ->
+                MupaCrossfadeConfig.setDurationSeconds(prefs.crossfadeSeconds)
                 val artists = artistRepository.getArtistsByIds(prefs.favoriteArtistIds).getOrDefault(emptyList())
                 // Konsistensi angka N6: total & favorit mengikuti activeSource yang sama dengan Pustaka
                 val activeTracks = if (prefs.activeSource == AudioSourceType.LOCAL) {
@@ -122,6 +124,12 @@ class MupaAppViewModel @Inject constructor(
 
     fun setActiveSource(source: AudioSourceType) {
         viewModelScope.launch { preferencesRepository.setActiveSource(source) }
+    }
+
+    fun setCrossfadeSeconds(seconds: Int) {
+        val clamped = seconds.coerceIn(MupaCrossfadeConfig.MIN_SECONDS, MupaCrossfadeConfig.MAX_SECONDS)
+        MupaCrossfadeConfig.setDurationSeconds(clamped)
+        viewModelScope.launch { preferencesRepository.setCrossfadeSeconds(clamped) }
     }
 
     fun importLocalFiles(uris: List<Uri>) {

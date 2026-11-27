@@ -59,6 +59,7 @@ class MupaPlaybackService : MediaLibraryService() {
     lateinit var customAudioProcessors: List<@JvmSuppressWildcards AudioProcessor>
 
     private var player: ExoPlayer? = null
+    private var crossfadeEngine: MupaCrossfadeEngine? = null
     private var mediaLibrarySession: MediaLibrarySession? = null
 
     override fun onCreate() {
@@ -115,6 +116,12 @@ class MupaPlaybackService : MediaLibraryService() {
             .build()
 
         player = exoPlayer
+        crossfadeEngine = MupaCrossfadeEngine(
+            context = this,
+            primaryPlayer = exoPlayer,
+            dataSourceFactory = resolvingFactory,
+            customAudioProcessors = customAudioProcessors,
+        ).also { it.attach() }
         mediaLibrarySession = MediaLibrarySession.Builder(
             this,
             exoPlayer,
@@ -138,6 +145,8 @@ class MupaPlaybackService : MediaLibraryService() {
     }
 
     override fun onDestroy() {
+        crossfadeEngine?.release()
+        crossfadeEngine = null
         mediaLibrarySession?.release()
         mediaLibrarySession = null
         player?.release()

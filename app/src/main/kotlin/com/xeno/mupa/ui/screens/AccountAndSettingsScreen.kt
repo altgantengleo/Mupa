@@ -39,7 +39,10 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Slider
+import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
+import kotlin.math.roundToInt
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
@@ -283,6 +286,7 @@ fun SettingsScreen(
     onPerformanceModeChange: (Boolean) -> Unit,
     onStripArtistNameChange: (Boolean) -> Unit,
     onOpenEqualizer: () -> Unit,
+    onCrossfadeSecondsChange: (Int) -> Unit = {},
     onClearAudioCache: () -> Unit,
     onImportLocalFolder: () -> Unit,
     onRescanLocalFolders: () -> Unit,
@@ -415,6 +419,55 @@ fun SettingsScreen(
         // Grup 2: Pemutaran
         item(key = "group_playback") {
             SettingsGroupCard(title = "Pemutaran") {
+                // Crossfade Equal-Power ala Spotify (0 = Mati, 1..12 detik)
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Text(
+                            text = "Crossfade",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                        )
+                        Text(
+                            text = if (preferences.crossfadeSeconds <= 0) {
+                                "Mati"
+                            } else {
+                                "${preferences.crossfadeSeconds} detik"
+                            },
+                            style = MaterialTheme.typography.labelLarge,
+                            color = if (preferences.crossfadeSeconds > 0) {
+                                MupaPalette.CoralPrimary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            },
+                        )
+                    }
+                    Text(
+                        text = "Perpaduan halus equal-power antar lagu tanpa jeda (0–12 dtk).",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                    )
+                    Slider(
+                        value = preferences.crossfadeSeconds.toFloat(),
+                        onValueChange = { onCrossfadeSecondsChange(it.roundToInt().coerceIn(0, 12)) },
+                        valueRange = 0f..12f,
+                        steps = 11,
+                        colors = SliderDefaults.colors(
+                            thumbColor = MupaPalette.CoralPrimary,
+                            activeTrackColor = MupaPalette.CoralPrimary,
+                            inactiveTrackColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            activeTickColor = MupaPalette.LogoCharcoal.copy(alpha = 0.45f),
+                            inactiveTickColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.25f),
+                        ),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
                 SettingsActionRow(
                     icon = Icons.Rounded.Equalizer,
                     title = "Equalizer",

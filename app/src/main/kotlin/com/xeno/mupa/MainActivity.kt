@@ -76,6 +76,7 @@ class MainActivity : ComponentActivity() {
                     onAuroraEnabledChange = appViewModel::setAuroraEnabled,
                     onPerformanceModeChange = appViewModel::setPerformanceMode,
                     onStripArtistNameChange = appViewModel::setStripArtistName,
+                    onCrossfadeSecondsChange = appViewModel::setCrossfadeSeconds,
                     onOpenEditFavoriteArtists = appViewModel::openEditFavoriteArtists,
                     onCloseEditFavoriteArtists = appViewModel::closeEditFavoriteArtists,
                     onTogglePlayPause = playerViewModel::togglePlayPause,
