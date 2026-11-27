@@ -19,6 +19,7 @@
 
 # Keep Media3 Service & AudioProcessor entry points
 -keep class com.xeno.mupa.playback.MupaPlaybackService { *; }
+-keep class com.xeno.mupa.playback.MupaCrossfadeEngine { *; }
 -keep class com.xeno.mupa.playback.eq.FiveBandEqualizerProcessor { *; }
 
 # Keep NewPipeExtractor & Rhino JS engine reflection inside :streaming:innertube
