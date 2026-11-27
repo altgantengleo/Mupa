@@ -116,9 +116,14 @@ class MupaPlaybackService : MediaLibraryService() {
             .build()
 
         player = exoPlayer
+        mediaLibrarySession = MediaLibrarySession.Builder(
+            this,
+            exoPlayer,
+            object : MediaLibrarySession.Callback {},
+        ).build()
         crossfadeEngine = MupaCrossfadeEngine(
             context = this,
-            primaryPlayer = exoPlayer,
+            initialActivePlayer = exoPlayer,
             dataSourceFactory = resolvingFactory,
             audioProcessorsFactory = {
                 customAudioProcessors.mapNotNull { processor ->
@@ -134,12 +139,11 @@ class MupaPlaybackService : MediaLibraryService() {
                     eqMasters.forEach { master -> master.removeSyncedClone(clone) }
                 }
             },
+            onActivePlayerSwapped = { newActive ->
+                player = newActive
+                mediaLibrarySession?.player = newActive
+            },
         ).also { it.attach() }
-        mediaLibrarySession = MediaLibrarySession.Builder(
-            this,
-            exoPlayer,
-            object : MediaLibrarySession.Callback {},
-        ).build()
     }
 
     override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibrarySession? =
@@ -158,11 +162,10 @@ class MupaPlaybackService : MediaLibraryService() {
     }
 
     override fun onDestroy() {
-        crossfadeEngine?.release()
-        crossfadeEngine = null
         mediaLibrarySession?.release()
         mediaLibrarySession = null
-        player?.release()
+        crossfadeEngine?.release()
+        crossfadeEngine = null
         player = null
         super.onDestroy()
     }

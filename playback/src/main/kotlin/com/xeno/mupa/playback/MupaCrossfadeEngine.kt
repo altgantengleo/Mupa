@@ -3,6 +3,7 @@ package com.xeno.mupa.playback
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
@@ -20,6 +21,7 @@ import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.PI
 import kotlin.math.cos
+import kotlin.math.pow
 import kotlin.math.sin
 
 /**
@@ -40,61 +42,70 @@ object MupaCrossfadeConfig {
     }
 
     /**
-     * Kurva equal-power (cosine/sine) dengan S-curve smoothstep ala Spotify:
-     * menjaga daya persepsi konstan (out^2 + in^2 = 1) tanpa lembah volume atau puncak keras.
+     * Kurva equal-power psikoakustik (smootherstep orde-5 + cos/sin^1.25) ala Spotify:
+     * - Turunan pertama & kedua bernilai 0 di awal/akhir -> awal masuk & akhir pudar tak terasa.
+     * - Eksponen 1.25 menyesuaikan skala amplitudo linear Android AudioTrack ke persepsi dB telinga.
      */
     fun computeEqualPowerGains(progress: Float): Pair<Float, Float> {
         val p = progress.coerceIn(0f, 1f)
-        // Smoothstep S-curve agar awal dan akhir transisi terasa sangat organik
-        val s = p * p * (3f - 2f * p)
+        // Smootherstep orde-5: p^3 * (p * (6p - 15) + 10)
+        val s = p * p * p * (p * (p * 6f - 15f) + 10f)
         val angle = s * (PI / 2.0)
-        val outGain = cos(angle).toFloat().coerceIn(0f, 1f)
-        val inGain = sin(angle).toFloat().coerceIn(0f, 1f)
+        val outGain = cos(angle).coerceAtLeast(0.0).pow(1.25).toFloat().coerceIn(0f, 1f)
+        val inGain = sin(angle).coerceAtLeast(0.0).pow(1.25).toFloat().coerceIn(0f, 1f)
         return outGain to inGain
     }
 }
 
 /**
- * Mesin Crossfade Dual-Deck Equal-Power ala Spotify untuk Media3 ExoPlayer:
- * - Memakai dek sekunder (tanpa merebut audio focus) yang berbagi cache & ResolvingDataSource yang sama.
- * - Mempra-muat lagu berikutnya ~5 detik sebelum jendela crossfade sehingga masuk tanpa jeda buffering.
- * - Mencampur (overlap nyata) lagu keluar & lagu masuk pada ~60 fps (16 ms) memakai kurva equal-power cos/sin.
- * - Menyerahkan kendali mulus kembali ke primaryPlayer (MediaSession) tepat di akhir fade dengan micro-ramp 40 ms.
+ * Mesin Crossfade Dual-Deck Ping-Pong Sejati ala Spotify untuk Media3 ExoPlayer:
+ * - Dua dek ExoPlayer identik bergantian menjadi activePlayer di MediaLibrarySession (tanpa seek ulang!).
+ * - Lagu berikutnya dipra-muat 8 detik sebelum jendela crossfade di dek standby.
+ * - Overlap nyata pada 100 Hz (10 ms) memakai kurva psikoakustik smootherstep + equal-power.
+ * - Di akhir fade, antrean disisipkan di sekitar lagu aktif pada dek masuk tanpa memutus audio sedetik pun,
+ *   lalu MediaLibrarySession.setPlayer(dekMasuk) dipanggil -> nol stutter, nol echo, nol lonjakan volume.
  */
 @OptIn(UnstableApi::class)
 class MupaCrossfadeEngine(
     private val context: Context,
-    private val primaryPlayer: ExoPlayer,
+    initialActivePlayer: ExoPlayer,
     private val dataSourceFactory: DataSource.Factory,
     private val audioProcessorsFactory: () -> List<AudioProcessor>,
     private val onReleaseProcessors: (List<AudioProcessor>) -> Unit = {},
+    private val onActivePlayerSwapped: (ExoPlayer) -> Unit = {},
 ) {
     private val handler = Handler(Looper.getMainLooper())
-    private var deckPlayer: ExoPlayer? = null
-    private var deckProcessors: List<AudioProcessor> = emptyList()
+    private val musicAudioAttributes = AudioAttributes.Builder()
+        .setUsage(C.USAGE_MEDIA)
+        .setContentType(C.AUDIO_CONTENT_TYPE_MUSIC)
+        .build()
+
+    private var activePlayer: ExoPlayer = initialActivePlayer
+    private var standbyPlayer: ExoPlayer? = null
+    private val createdExtraProcessors = mutableListOf<List<AudioProcessor>>()
 
     private var stagedMediaId: String? = null
     private var stagedTargetIndex: Int = C.INDEX_UNSET
-    private var isDeckReady: Boolean = false
+    private var isStandbyReady: Boolean = false
 
     private var isCrossfading: Boolean = false
-    private var crossfadeStartWallMs: Long = 0L
+    private var crossfadeStartElapsedMs: Long = 0L
     private var activeCrossfadeDurationMs: Long = 0L
     private var handoffTargetIndex: Int = C.INDEX_UNSET
-    private var isPerformingHandoff: Boolean = false
+    private var isPerformingSwap: Boolean = false
 
-    private val primaryListener = object : Player.Listener {
+    private val activeListener = object : Player.Listener {
         override fun onIsPlayingChanged(isPlaying: Boolean) {
-            if (!isPlaying && isCrossfading && !isPerformingHandoff) {
-                cancelCrossfade(resetPrimaryVolume = true)
+            if (!isPlaying && isCrossfading && !isPerformingSwap) {
+                cancelCrossfade(resetActiveVolume = true)
             }
             schedulePollIfNeeded()
         }
 
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
-            if (!isPerformingHandoff) {
-                cancelCrossfade(resetPrimaryVolume = true)
-                clearStagedDeck()
+            if (!isPerformingSwap) {
+                cancelCrossfade(resetActiveVolume = true)
+                clearStandbyDeck()
             }
             schedulePollIfNeeded()
         }
@@ -104,28 +115,28 @@ class MupaCrossfadeEngine(
             newPosition: Player.PositionInfo,
             reason: Int,
         ) {
-            if (!isPerformingHandoff && reason == Player.DISCONTINUITY_REASON_SEEK) {
-                cancelCrossfade(resetPrimaryVolume = true)
-                clearStagedDeck()
+            if (!isPerformingSwap && reason == Player.DISCONTINUITY_REASON_SEEK) {
+                cancelCrossfade(resetActiveVolume = true)
+                clearStandbyDeck()
             }
         }
 
         override fun onPlaybackStateChanged(playbackState: Int) {
-            if (playbackState == Player.STATE_ENDED || playbackState == Player.STATE_IDLE) {
-                cancelCrossfade(resetPrimaryVolume = true)
+            if (!isPerformingSwap && (playbackState == Player.STATE_ENDED || playbackState == Player.STATE_IDLE)) {
+                cancelCrossfade(resetActiveVolume = true)
             }
             schedulePollIfNeeded()
         }
     }
 
-    private val deckListener = object : Player.Listener {
+    private val standbyListener = object : Player.Listener {
         override fun onPlaybackStateChanged(playbackState: Int) {
-            isDeckReady = playbackState == Player.STATE_READY
+            isStandbyReady = playbackState == Player.STATE_READY
         }
 
         override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-            cancelCrossfade(resetPrimaryVolume = true)
-            clearStagedDeck()
+            cancelCrossfade(resetActiveVolume = true)
+            clearStandbyDeck()
         }
     }
 
@@ -133,45 +144,50 @@ class MupaCrossfadeEngine(
         override fun run() {
             tick()
             val delayMs = if (isCrossfading) FADE_STEP_MS else MONITOR_INTERVAL_MS
-            if (primaryPlayer.isPlaying || isCrossfading) {
+            if (activePlayer.isPlaying || isCrossfading) {
                 handler.postDelayed(this, delayMs)
             }
         }
     }
 
     fun attach() {
-        primaryPlayer.addListener(primaryListener)
+        activePlayer.addListener(activeListener)
         schedulePollIfNeeded()
     }
 
+    fun currentActivePlayer(): ExoPlayer = activePlayer
+
     fun release() {
         handler.removeCallbacksAndMessages(null)
-        primaryPlayer.removeListener(primaryListener)
+        runCatching { activePlayer.removeListener(activeListener) }
         runCatching {
-            deckPlayer?.removeListener(deckListener)
-            deckPlayer?.release()
+            standbyPlayer?.removeListener(standbyListener)
+            standbyPlayer?.release()
         }
-        deckPlayer = null
-        if (deckProcessors.isNotEmpty()) {
-            runCatching { onReleaseProcessors(deckProcessors) }
-            deckProcessors = emptyList()
+        standbyPlayer = null
+        runCatching { activePlayer.release() }
+        createdExtraProcessors.forEach { list ->
+            runCatching { onReleaseProcessors(list) }
         }
+        createdExtraProcessors.clear()
     }
 
     private fun schedulePollIfNeeded() {
         handler.removeCallbacks(pollRunnable)
-        if (primaryPlayer.isPlaying || isCrossfading) {
+        if (activePlayer.isPlaying || isCrossfading) {
             handler.postDelayed(pollRunnable, if (isCrossfading) FADE_STEP_MS else MONITOR_INTERVAL_MS)
         }
     }
 
-    private fun ensureDeckPlayer(): ExoPlayer {
-        deckPlayer?.let { return it }
-        // Wajib membuat instance AudioProcessor terpisah agar tidak bentrok ByteBuffer dengan primaryPlayer
+    private fun ensureStandbyPlayer(): ExoPlayer {
+        standbyPlayer?.let { return it }
+        // Instance AudioProcessor terpisah per dek agar ByteBuffer EQ tidak pernah bentrok
         val freshProcessors = audioProcessorsFactory()
-        deckProcessors = freshProcessors
+        createdExtraProcessors.add(freshProcessors)
+
         val loadControl = DefaultLoadControl.Builder()
-            .setBufferDurationsMs(8_000, 16_000, 1_000, 2_000)
+            .setBufferDurationsMs(15_000, 30_000, 1_500, 3_000)
+            .setTargetBufferBytes(6 * 1024 * 1024)
             .setPrioritizeTimeOverSizeThresholds(true)
             .build()
         val renderersFactory = object : DefaultRenderersFactory(context) {
@@ -189,25 +205,21 @@ class MupaCrossfadeEngine(
         return ExoPlayer.Builder(context, renderersFactory)
             .setLoadControl(loadControl)
             .setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory))
-            .setAudioAttributes(
-                AudioAttributes.Builder()
-                    .setUsage(C.USAGE_MEDIA)
-                    .setContentType(C.CONTENT_TYPE_MUSIC)
-                    .build(),
-                /* handleAudioFocus = */ false, // Tidak merebut audio focus dari primaryPlayer
-            )
+            .setAudioAttributes(musicAudioAttributes, /* handleAudioFocus = */ false)
+            .setHandleAudioBecomingNoisy(true)
+            .setWakeMode(C.WAKE_MODE_LOCAL)
             .build()
             .also { created ->
                 created.volume = 0f
-                created.addListener(deckListener)
-                deckPlayer = created
+                created.addListener(standbyListener)
+                standbyPlayer = created
             }
     }
 
     private fun tick() {
         val configuredSec = MupaCrossfadeConfig.getDurationSeconds()
         if (configuredSec <= 0) {
-            if (isCrossfading) cancelCrossfade(resetPrimaryVolume = true)
+            if (isCrossfading) cancelCrossfade(resetActiveVolume = true)
             return
         }
 
@@ -216,171 +228,189 @@ class MupaCrossfadeEngine(
             return
         }
 
-        if (!primaryPlayer.isPlaying) return
-        if (primaryPlayer.repeatMode == Player.REPEAT_MODE_ONE) return
+        if (!activePlayer.isPlaying) return
+        if (activePlayer.repeatMode == Player.REPEAT_MODE_ONE) return
 
-        val nextIndex = primaryPlayer.nextMediaItemIndex
-        if (nextIndex == C.INDEX_UNSET || nextIndex == primaryPlayer.currentMediaItemIndex) return
+        val nextIndex = activePlayer.nextMediaItemIndex
+        if (nextIndex == C.INDEX_UNSET || nextIndex == activePlayer.currentMediaItemIndex) return
 
-        val durationMs = primaryPlayer.duration
+        val durationMs = activePlayer.duration
         if (durationMs <= 0L || durationMs == C.TIME_UNSET) return
 
-        val positionMs = primaryPlayer.currentPosition.coerceAtLeast(0L)
+        val positionMs = activePlayer.currentPosition.coerceAtLeast(0L)
         val remainingMs = durationMs - positionMs
         if (remainingMs <= 0L) return
 
         val requestedFadeMs = configuredSec * 1_000L
-        // Jangan pernah memakan lebih dari 25% durasi lagu pendek
-        val effectiveFadeMs = requestedFadeMs.coerceAtMost((durationMs / 4L).coerceAtLeast(1_500L))
+        // Jangan pernah memakan lebih dari 30% durasi lagu pendek
+        val effectiveFadeMs = requestedFadeMs.coerceAtMost((durationMs * 3L / 10L).coerceAtLeast(1_500L))
         val preStageWindowMs = effectiveFadeMs + PRE_STAGE_LEAD_MS
 
-        val nextItem = primaryPlayer.getMediaItemAt(nextIndex)
+        val nextItem = activePlayer.getMediaItemAt(nextIndex)
 
-        // 1. Pra-muat dek sekunder ~5 detik sebelum jendela crossfade
+        // 1. Pra-muat dek standby 8 detik sebelum jendela crossfade agar buffer 100% siap
         if (remainingMs <= preStageWindowMs && stagedMediaId != nextItem.mediaId) {
-            stageNextOnDeck(nextItem, nextIndex)
+            stageNextOnStandby(nextItem, nextIndex)
         }
 
-        // 2. Mulai overlap equal-power begitu masuk jendela crossfade dan dek siap
+        // 2. Mulai overlap equal-power begitu masuk jendela crossfade dan dek standby siap
         if (remainingMs <= effectiveFadeMs && remainingMs >= MIN_TRIGGER_REMAINING_MS) {
-            if (stagedMediaId == nextItem.mediaId && isDeckReady) {
+            if (stagedMediaId == nextItem.mediaId && isStandbyReady) {
                 startCrossfade(nextIndex, remainingMs.coerceAtMost(effectiveFadeMs))
             }
         }
     }
 
-    private fun stageNextOnDeck(item: MediaItem, index: Int) {
-        val deck = ensureDeckPlayer()
+    private fun stageNextOnStandby(item: MediaItem, index: Int) {
+        val standby = ensureStandbyPlayer()
         stagedMediaId = item.mediaId
         stagedTargetIndex = index
-        isDeckReady = false
-        deck.stop()
-        deck.clearMediaItems()
-        deck.volume = 0f
-        deck.setMediaItem(item)
-        deck.playWhenReady = false
-        deck.prepare()
+        isStandbyReady = false
+        standby.stop()
+        standby.clearMediaItems()
+        standby.volume = 0f
+        standby.setMediaItem(item)
+        standby.playWhenReady = false
+        standby.prepare()
     }
 
     private fun startCrossfade(targetIndex: Int, fadeDurationMs: Long) {
-        val deck = deckPlayer ?: return
+        val standby = standbyPlayer ?: return
         isCrossfading = true
         handoffTargetIndex = targetIndex
         activeCrossfadeDurationMs = fadeDurationMs.coerceAtLeast(800L)
-        crossfadeStartWallMs = System.currentTimeMillis()
-        deck.volume = 0f
-        deck.seekTo(0L)
-        deck.play()
-        // Segera beralih ke tick 16ms (~60fps)
+        crossfadeStartElapsedMs = SystemClock.elapsedRealtime()
+        standby.volume = 0f
+        standby.seekTo(0L)
+        standby.play()
+        // Segera beralih ke tick 10ms (~100fps) agar kurva gain ultra-halus
         handler.removeCallbacks(pollRunnable)
         handler.postDelayed(pollRunnable, FADE_STEP_MS)
     }
 
     private fun stepActiveCrossfade() {
-        val deck = deckPlayer
-        if (deck == null || !primaryPlayer.isPlaying) {
-            cancelCrossfade(resetPrimaryVolume = true)
+        val standby = standbyPlayer
+        if (standby == null || !activePlayer.isPlaying) {
+            cancelCrossfade(resetActiveVolume = true)
             return
         }
 
-        val elapsed = (System.currentTimeMillis() - crossfadeStartWallMs).coerceAtLeast(0L)
-        val durationMs = primaryPlayer.duration.takeIf { it > 0L && it != C.TIME_UNSET } ?: Long.MAX_VALUE
-        val primaryRemaining = (durationMs - primaryPlayer.currentPosition).coerceAtLeast(0L)
+        val elapsed = (SystemClock.elapsedRealtime() - crossfadeStartElapsedMs).coerceAtLeast(0L)
+        val durationMs = activePlayer.duration.takeIf { it > 0L && it != C.TIME_UNSET } ?: Long.MAX_VALUE
+        val activeRemaining = (durationMs - activePlayer.currentPosition).coerceAtLeast(0L)
 
         val progress = (elapsed.toFloat() / activeCrossfadeDurationMs.toFloat()).coerceIn(0f, 1f)
         val (outGain, inGain) = MupaCrossfadeConfig.computeEqualPowerGains(progress)
-        primaryPlayer.volume = outGain
-        deck.volume = inGain
+        activePlayer.volume = outGain
+        standby.volume = inGain
 
-        // Handoff mulus ke primaryPlayer saat fade tuntas atau 90ms sebelum lagu lama berakhir
-        if (progress >= 1f || primaryRemaining <= HANDOFF_LEAD_MS) {
-            performSeamlessHandoff(deck)
+        // Tukar dek secara mulus tanpa seek ulang saat fade tuntas atau 60ms sebelum lagu lama habis
+        if (progress >= 1f || activeRemaining <= SWAP_LEAD_MS) {
+            performZeroSeekDeckSwap(standby)
         }
     }
 
-    private fun performSeamlessHandoff(deck: ExoPlayer) {
+    private fun performZeroSeekDeckSwap(incomingDeck: ExoPlayer) {
+        val outgoingDeck = activePlayer
         val targetIdx = handoffTargetIndex
-        if (targetIdx == C.INDEX_UNSET || targetIdx >= primaryPlayer.mediaItemCount) {
-            cancelCrossfade(resetPrimaryVolume = true)
+        val totalItems = outgoingDeck.mediaItemCount
+        if (targetIdx == C.INDEX_UNSET || targetIdx !in 0 until totalItems) {
+            cancelCrossfade(resetActiveVolume = true)
             return
         }
 
-        isPerformingHandoff = true
+        isPerformingSwap = true
         isCrossfading = false
-        val currentDeckPos = deck.currentPosition.coerceAtLeast(0L)
 
-        // Pindahkan primaryPlayer ke posisi persis dek (sudah ter-cache lokal sehingga instan!)
-        primaryPlayer.volume = 1f
-        primaryPlayer.seekTo(targetIdx, currentDeckPos)
-        if (!primaryPlayer.playWhenReady) {
-            primaryPlayer.play()
+        // Pastikan volume akhir bersih sebelum swap (outgoing senyap total, incoming penuh)
+        outgoingDeck.volume = 0f
+        incomingDeck.volume = 1f
+
+        // Sisipkan item sebelum & sesudah targetIdx ke incomingDeck TANPA memutus lagu yang sedang diputar!
+        val beforeItems = if (targetIdx > 0) {
+            List(targetIdx) { idx -> outgoingDeck.getMediaItemAt(idx) }
+        } else {
+            emptyList()
         }
-
-        // Tunggu primaryPlayer STATE_READY (maks 240ms) sebelum micro-ramp 40ms dek sekunder
-        val handoffDeadlineMs = System.currentTimeMillis() + HANDOFF_WAIT_MAX_MS
-        val finishHandoffRunnable = object : Runnable {
-            override fun run() {
-                val ready = primaryPlayer.playbackState == Player.STATE_READY
-                if (!ready && System.currentTimeMillis() < handoffDeadlineMs) {
-                    handler.postDelayed(this, HANDOFF_WAIT_POLL_MS)
-                    return
-                }
-                handler.postDelayed(
-                    {
-                        runCatching {
-                            deck.volume = 0f
-                            deck.pause()
-                            deck.stop()
-                            deck.clearMediaItems()
-                        }
-                        stagedMediaId = null
-                        stagedTargetIndex = C.INDEX_UNSET
-                        isDeckReady = false
-                        handoffTargetIndex = C.INDEX_UNSET
-                        isPerformingHandoff = false
-                        schedulePollIfNeeded()
-                    },
-                    MICRO_RAMP_MS,
-                )
+        val afterItems = if (targetIdx + 1 < totalItems) {
+            List(totalItems - (targetIdx + 1)) { offset ->
+                outgoingDeck.getMediaItemAt(targetIdx + 1 + offset)
             }
+        } else {
+            emptyList()
         }
-        handler.post(finishHandoffRunnable)
-    }
 
-    private fun cancelCrossfade(resetPrimaryVolume: Boolean) {
-        isCrossfading = false
-        handoffTargetIndex = C.INDEX_UNSET
-        if (resetPrimaryVolume) {
-            primaryPlayer.volume = 1f
+        incomingDeck.repeatMode = outgoingDeck.repeatMode
+        incomingDeck.shuffleModeEnabled = outgoingDeck.shuffleModeEnabled
+        if (beforeItems.isNotEmpty()) {
+            incomingDeck.addMediaItems(0, beforeItems)
         }
-        deckPlayer?.let { deck ->
-            runCatching {
-                deck.volume = 0f
-                deck.pause()
-            }
+        if (afterItems.isNotEmpty()) {
+            incomingDeck.addMediaItems(afterItems)
         }
-    }
 
-    private fun clearStagedDeck() {
+        // Tukar listener & peran dek
+        outgoingDeck.removeListener(activeListener)
+        incomingDeck.removeListener(standbyListener)
+
+        // Lepas audio focus dari dek lama (sudah 0f) lalu serahkan ke dek aktif baru
+        outgoingDeck.setAudioAttributes(musicAudioAttributes, /* handleAudioFocus = */ false)
+        outgoingDeck.pause()
+        outgoingDeck.stop()
+        outgoingDeck.clearMediaItems()
+
+        incomingDeck.setAudioAttributes(musicAudioAttributes, /* handleAudioFocus = */ true)
+
+        activePlayer = incomingDeck
+        standbyPlayer = outgoingDeck
+
+        activePlayer.addListener(activeListener)
+        standbyPlayer?.addListener(standbyListener)
+
+        // Reset staging untuk lagu berikutnya
         stagedMediaId = null
         stagedTargetIndex = C.INDEX_UNSET
-        isDeckReady = false
-        deckPlayer?.let { deck ->
+        isStandbyReady = false
+        handoffTargetIndex = C.INDEX_UNSET
+
+        // Pindahkan MediaLibrarySession ke dek aktif baru (MediaController tersinkron tanpa memutus audio!)
+        onActivePlayerSwapped(activePlayer)
+
+        isPerformingSwap = false
+        schedulePollIfNeeded()
+    }
+
+    private fun cancelCrossfade(resetActiveVolume: Boolean) {
+        isCrossfading = false
+        handoffTargetIndex = C.INDEX_UNSET
+        if (resetActiveVolume) {
+            activePlayer.volume = 1f
+        }
+        standbyPlayer?.let { standby ->
             runCatching {
-                deck.stop()
-                deck.clearMediaItems()
+                standby.volume = 0f
+                standby.pause()
+            }
+        }
+    }
+
+    private fun clearStandbyDeck() {
+        stagedMediaId = null
+        stagedTargetIndex = C.INDEX_UNSET
+        isStandbyReady = false
+        standbyPlayer?.let { standby ->
+            runCatching {
+                standby.stop()
+                standby.clearMediaItems()
             }
         }
     }
 
     companion object {
-        private const val MONITOR_INTERVAL_MS = 250L
-        private const val FADE_STEP_MS = 16L
-        private const val PRE_STAGE_LEAD_MS = 5_000L
-        private const val MIN_TRIGGER_REMAINING_MS = 500L
-        private const val HANDOFF_LEAD_MS = 90L
-        private const val HANDOFF_WAIT_POLL_MS = 20L
-        private const val HANDOFF_WAIT_MAX_MS = 240L
-        private const val MICRO_RAMP_MS = 40L
+        private const val MONITOR_INTERVAL_MS = 200L
+        private const val FADE_STEP_MS = 10L
+        private const val PRE_STAGE_LEAD_MS = 8_000L
+        private const val MIN_TRIGGER_REMAINING_MS = 400L
+        private const val SWAP_LEAD_MS = 60L
     }
 }

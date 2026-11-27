@@ -283,14 +283,41 @@ class MultiProviderCatalogAggregator(
         if (normQuery.isBlank()) return 0
         val title = track.title.lowercase()
         val artist = track.artistName.lowercase()
+        val combined = "$title $artist"
         var score = 0
-        if (title == normQuery) score += 100
-        else if (title.startsWith(normQuery)) score += 60
-        else if (title.contains(normQuery)) score += 35
-        if (artist == normQuery) score += 50
-        else if (artist.contains(normQuery)) score += 25
-        if (SmartQueueFilter.isAlternateVersionTitle(track.title)) score -= 30
+        if (title == normQuery) score += 110
+        else if (title.startsWith(normQuery)) score += 70
+        else if (title.contains(normQuery)) score += 45
+        if (artist == normQuery) score += 55
+        else if (artist.contains(normQuery)) score += 30
+
+        // Pencocokan berbasis kata kunci (mis. "phonk tiki tiki" tetap mengangkat "TIKI TIKI - QMIIR" ke puncak)
+        val queryTokens = normQuery
+            .split(Regex("""[^a-z0-9]+"""))
+            .filter { it.length >= 2 }
+            .distinct()
+        if (queryTokens.isNotEmpty()) {
+            val titleHits = queryTokens.count { title.contains(it) }
+            val combinedHits = queryTokens.count { combined.contains(it) }
+            score += (titleHits * 45) / queryTokens.size
+            score += (combinedHits * 25) / queryTokens.size
+            if (titleHits == queryTokens.size) score += 25
+        }
+
+        // Jangan penalti versi slowed/remix/phonk/live bila pengguna memang mengetik kata tersebut
+        val queryWantsAlt = ALT_QUERY_HINTS.any { normQuery.contains(it) }
+        if (!queryWantsAlt && SmartQueueFilter.isAlternateVersionTitle(track.title)) {
+            score -= 25
+        }
         return score
+    }
+
+    companion object {
+        private val ALT_QUERY_HINTS = listOf(
+            "phonk", "funk", "slowed", "sped", "speed", "remix", "dj",
+            "reverb", "nightcore", "bass", "live", "cover", "acoustic",
+            "karaoke", "instrumental", "edit", "mashup", "koplo",
+        )
     }
 
     private fun mergeArtists(

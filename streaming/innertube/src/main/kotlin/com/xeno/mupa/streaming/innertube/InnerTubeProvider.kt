@@ -11,6 +11,8 @@ import com.xeno.mupa.streaming.api.StreamingCatalogProvider
 import com.xeno.mupa.streaming.api.StreamingError
 import com.xeno.mupa.streaming.api.StreamingRadioProvider
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
@@ -83,31 +85,48 @@ class InnerTubeProvider(
 
     override suspend fun searchTracks(query: String, limit: Int): Result<List<Track>> =
         withContext(Dispatchers.IO) {
-            val withFilter = buildJsonObject {
-                put("context", InnerTubeProfiles.WEB_REMIX.buildContextJson())
-                put("query", query)
-                put("params", SONGS_FILTER_PARAMS)
-            }
-            val primary = postInnerTube(InnerTubeProfiles.WEB_REMIX, "search", withFilter.toString())
-                .fold(
-                    onSuccess = { InnerTubeParser.parseSearchTracks(it, limit) },
-                    onFailure = { Result.failure(it) },
-                )
-            val tracks = primary.getOrDefault(emptyList())
-            if (tracks.isNotEmpty()) {
-                return@withContext Result.success(tracks)
-            }
+            coroutineScope {
+                val withFilter = buildJsonObject {
+                    put("context", InnerTubeProfiles.WEB_REMIX.buildContextJson())
+                    put("query", query)
+                    put("params", SONGS_FILTER_PARAMS)
+                }
+                val plainBody = buildJsonObject {
+                    put("context", InnerTubeProfiles.WEB_REMIX.buildContextJson())
+                    put("query", query)
+                }
+                // Cari paralel di shelf Lagu resmi + pencarian bebas YouTube Music (menjangkau Phonk, TikTok, Remix, Slowed, DJ, Video musik)
+                val songsDeferred = async {
+                    postInnerTube(InnerTubeProfiles.WEB_REMIX, "search", withFilter.toString())
+                        .fold(
+                            onSuccess = { InnerTubeParser.parseSearchTracks(it, limit) },
+                            onFailure = { Result.failure(it) },
+                        )
+                }
+                val broadDeferred = async {
+                    postInnerTube(InnerTubeProfiles.WEB_REMIX, "search", plainBody.toString())
+                        .fold(
+                            onSuccess = { InnerTubeParser.parseSearchTracks(it, limit) },
+                            onFailure = { Result.failure(it) },
+                        )
+                }
 
-            // Fallback tanpa filter params bila YouTube mengubah token filter
-            val plainBody = buildJsonObject {
-                put("context", InnerTubeProfiles.WEB_REMIX.buildContextJson())
-                put("query", query)
+                val songsRes = songsDeferred.await()
+                val broadRes = broadDeferred.await()
+                val combined = (songsRes.getOrDefault(emptyList()) + broadRes.getOrDefault(emptyList()))
+                    .distinctBy { it.id }
+                    .take(limit)
+
+                if (combined.isNotEmpty()) {
+                    Result.success(combined)
+                } else {
+                    Result.failure(
+                        songsRes.exceptionOrNull()
+                            ?: broadRes.exceptionOrNull()
+                            ?: StreamingError.Unavailable("Hasil tidak ditemukan untuk \"$query\""),
+                    )
+                }
             }
-            postInnerTube(InnerTubeProfiles.WEB_REMIX, "search", plainBody.toString())
-                .fold(
-                    onSuccess = { InnerTubeParser.parseSearchTracks(it, limit) },
-                    onFailure = { Result.failure(it) },
-                )
         }
 
     override suspend fun searchArtists(query: String, limit: Int): Result<List<Artist>> =
@@ -437,35 +456,56 @@ class InnerTubeProvider(
             candidates: List<Track>,
         ): Track? {
             val targetTitle = com.xeno.mupa.core.model.SmartQueueFilter.normalizeTitle(request.title)
-            val targetArtist = com.xeno.mupa.core.model.SmartQueueFilter.normalizeArtist(request.artistName)
+            val targetArtist = cleanChannelSuffix(
+                com.xeno.mupa.core.model.SmartQueueFilter.normalizeArtist(request.artistName),
+            )
             val targetIsAlt = com.xeno.mupa.core.model.SmartQueueFilter.isAlternateVersionTitle(request.title)
             var bestTrack: Track? = null
             var bestScore = 0f
+            var fallbackTrack: Track? = null
+            var fallbackScore = 0f
             for (cand in candidates) {
                 val candTitle = com.xeno.mupa.core.model.SmartQueueFilter.normalizeTitle(cand.title)
-                val candArtist = com.xeno.mupa.core.model.SmartQueueFilter.normalizeArtist(cand.artistName)
-                val titleSim = tokenSim(targetTitle, candTitle) * 0.50f
+                val candArtist = cleanChannelSuffix(
+                    com.xeno.mupa.core.model.SmartQueueFilter.normalizeArtist(cand.artistName),
+                )
+                val rawTitleSim = tokenSim(targetTitle, candTitle)
+                val titleSim = rawTitleSim * 0.50f
                 val artistSim = if (targetArtist.isNotEmpty() && candArtist.isNotEmpty()) {
                     tokenSim(targetArtist, candArtist) * 0.35f
                 } else {
                     0.18f
                 }
                 val durSim = when {
-                    request.durationMs <= 0L || cand.durationMs <= 0L -> 0.10f
+                    request.durationMs <= 0L || cand.durationMs <= 0L -> 0.12f
                     kotlin.math.abs(request.durationMs - cand.durationMs) <= 3_000L -> 0.15f
                     kotlin.math.abs(request.durationMs - cand.durationMs) <= 8_000L -> 0.08f
                     kotlin.math.abs(request.durationMs - cand.durationMs) <= 15_000L -> 0.0f
                     else -> -0.35f
                 }
-                val altPenalty = if (!targetIsAlt && com.xeno.mupa.core.model.SmartQueueFilter.isAlternateVersionTitle(cand.title)) -0.40f else 0f
+                val altPenalty = if (!targetIsAlt && com.xeno.mupa.core.model.SmartQueueFilter.isAlternateVersionTitle(cand.title)) -0.35f else 0f
                 val score = (titleSim + artistSim + durSim + altPenalty).coerceIn(0f, 1f)
                 if (score > bestScore) {
                     bestScore = score
                     bestTrack = cand
                 }
+                // Cadangan aman untuk lagu viral/phonk/indie yang judulnya cocok tapi nama channel sedikit beda
+                if (rawTitleSim >= 0.50f && score > fallbackScore) {
+                    fallbackScore = score
+                    fallbackTrack = cand
+                }
             }
-            return if (bestScore >= 0.72f) bestTrack else null
+            return when {
+                bestScore >= 0.72f -> bestTrack
+                fallbackScore >= 0.50f -> fallbackTrack
+                else -> null
+            }
         }
+
+        private fun cleanChannelSuffix(artist: String): String =
+            artist.replace(Regex("""\b(topic|vevo|official|music)\b"""), " ")
+                .replace(Regex("""\s+"""), " ")
+                .trim()
 
         private fun tokenSim(a: String, b: String): Float {
             if (a.isEmpty() || b.isEmpty()) return 0f
