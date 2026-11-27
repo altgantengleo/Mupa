@@ -74,6 +74,7 @@ class MupaPlayerViewModel @Inject constructor(
     private var udExtractJob: Job? = null
     private var radioLoadJob: Job? = null
     private var preResolveJob: Job? = null
+    private var udPrewarmJob: Job? = null
 
     @Volatile
     private var isCleared: Boolean = false
@@ -992,6 +993,7 @@ class MupaPlayerViewModel @Inject constructor(
         }
         UltraDynamicPaletteCache.get(track.id)?.let { cached ->
             _uiState.update { it.copy(ultraDynamicPalette = cached) }
+            prewarmUpcomingUltraDynamic()
             return
         }
         udExtractJob?.cancel()
@@ -1020,6 +1022,46 @@ class MupaPlayerViewModel @Inject constructor(
             if (_uiState.value.currentTrack?.id == track.id) {
                 _uiState.update { it.copy(ultraDynamicPalette = palette) }
             }
+            prewarmUpcomingUltraDynamic()
+        }
+    }
+
+    /**
+     * Pra-panas palet Ultra Dynamic + sampul 768px untuk 3 lagu berikutnya di antrean
+     * agar pergantian warna latar & cover saat Next / Crossfade terjadi instan (0 ms).
+     */
+    private fun prewarmUpcomingUltraDynamic() {
+        val state = _uiState.value
+        val upcoming = state.queue
+            .drop(state.currentIndex + 1)
+            .take(3)
+            .filter { !it.artworkUrl.isNullOrBlank() && UltraDynamicPaletteCache.get(it.id) == null }
+        if (upcoming.isEmpty()) return
+
+        udPrewarmJob?.cancel()
+        udPrewarmJob = viewModelScope.launch(Dispatchers.IO) {
+            val loader = SingletonImageLoader.get(appContext)
+            for (next in upcoming) {
+                val art = next.artworkUrl ?: continue
+                val model: Any = if (art.startsWith("/")) File(art) else art
+                runCatching {
+                    loader.enqueue(
+                        ImageRequest.Builder(appContext)
+                            .data(model)
+                            .size(768)
+                            .memoryCacheKey("mupa_cover_${next.id}")
+                            .build(),
+                    )
+                    val bmp = loader.execute(
+                        ImageRequest.Builder(appContext)
+                            .data(model)
+                            .size(128)
+                            .allowHardware(false)
+                            .build(),
+                    ).image?.toBitmap()
+                    UltraDynamicPaletteCache.extractOrGet(next.id, bmp)
+                }
+            }
         }
     }
 
@@ -1029,6 +1071,7 @@ class MupaPlayerViewModel @Inject constructor(
         stopPositionSync()
         lyricsFetchJob?.cancel()
         udExtractJob?.cancel()
+        udPrewarmJob?.cancel()
         mediaController?.removeListener(playerListener)
         controllerFuture?.let { MediaController.releaseFuture(it) }
         mediaController = null

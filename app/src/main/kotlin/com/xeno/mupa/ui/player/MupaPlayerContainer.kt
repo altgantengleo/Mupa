@@ -153,6 +153,7 @@ fun MupaPlayerOverlayHost(
     onMoveQueueItem: (Int, Int) -> Unit,
     onRemoveQueueItem: (Int) -> Unit,
     onClearUpcomingQueue: () -> Unit,
+    swipeSensitivity: Int = 1,
     modifier: Modifier = Modifier,
 ) {
     val track = playerState.currentTrack ?: return
@@ -244,10 +245,26 @@ fun MupaPlayerOverlayHost(
             }
         }
 
-        // Gestur seret ke bawah aman untuk kembali ke Mini Player (tidak terlalu sensitif, tidak bentrok dengan scroll lirik/seekbar)
-        val safeMinDownDragPx = with(density) { 28.dp.toPx() }
+        // Gestur seret ke bawah aman sesuai sensitivitas di Pengaturan (0 = Rendah/Aman, 1 = Sedang, 2 = Cepat)
+        val safeMinDownDragPx = with(density) {
+            when (swipeSensitivity) {
+                0 -> 42.dp.toPx()
+                2 -> 14.dp.toPx()
+                else -> 28.dp.toPx()
+            }
+        }
+        val collapseVelocityThreshold = when (swipeSensitivity) {
+            0 -> 1250f
+            2 -> 620f
+            else -> 950f
+        }
+        val stayExpandedThreshold = when (swipeSensitivity) {
+            0 -> 0.55f
+            2 -> 0.78f
+            else -> 0.65f
+        }
         val topHeaderSafeZonePx = statusTopPx + with(density) { 108.dp.toPx() }
-        val fullDragDownModifier = Modifier.pointerInput(sheetState, fullHeightPx, sheetOverlayVisible, playerState.isCinemaMode, showInlineLyrics) {
+        val fullDragDownModifier = Modifier.pointerInput(sheetState, fullHeightPx, sheetOverlayVisible, playerState.isCinemaMode, showInlineLyrics, swipeSensitivity) {
             val velocityTracker = VelocityTracker()
             awaitEachGesture {
                 val down = awaitFirstDown(requireUnconsumed = false)
@@ -290,7 +307,11 @@ fun MupaPlayerOverlayHost(
                         sheetState.onDragDelta(dy)
                     }
                     if (dragStarted) {
-                        sheetState.onDragEnd(velocityTracker.calculateVelocity().y)
+                        sheetState.onDragEnd(
+                            velocityYPxPerSec = velocityTracker.calculateVelocity().y,
+                            collapseVelocityThreshold = collapseVelocityThreshold,
+                            stayExpandedMinProgress = stayExpandedThreshold,
+                        )
                     }
                 }
             }

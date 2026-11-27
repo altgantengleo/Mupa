@@ -287,6 +287,7 @@ fun SettingsScreen(
     onStripArtistNameChange: (Boolean) -> Unit,
     onOpenEqualizer: () -> Unit,
     onCrossfadeSecondsChange: (Int) -> Unit = {},
+    onPlayerSwipeSensitivityChange: (Int) -> Unit = {},
     onClearAudioCache: () -> Unit,
     onImportLocalFolder: () -> Unit,
     onRescanLocalFolders: () -> Unit,
@@ -464,6 +465,31 @@ fun SettingsScreen(
                             inactiveTickColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.25f),
                         ),
                         modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+                // Sensitivitas seret turun pemutar penuh ke Mini Player (0 = Rendah/Aman, 1 = Sedang, 2 = Cepat)
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text(
+                        text = "Sensitivitas Geser ke Mini",
+                        style = MaterialTheme.typography.titleMedium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                    Text(
+                        text = when (preferences.playerSwipeSensitivity) {
+                            0 -> "Rendah (Aman): butuh tarikan turun mantap agar tidak sengaja tertutup."
+                            2 -> "Cepat: responsif dengan sapuan ringan ke bawah."
+                            else -> "Sedang: seimbang antara nyaman dan tetap aman."
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 2,
+                    )
+                    MupaSegmentedTabs(
+                        items = listOf("Rendah", "Sedang", "Cepat"),
+                        selectedIndex = preferences.playerSwipeSensitivity.coerceIn(0, 2),
+                        onSelect = onPlayerSwipeSensitivityChange,
                     )
                 }
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)

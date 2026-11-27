@@ -13,6 +13,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -153,65 +154,9 @@ fun MupaInlineLyricsPanel(
                 }
             }
         }
-
-        if (!playerState.lyricsIsPlain && playerState.lyrics.isNotEmpty() && !playerState.lyricsLoading) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 6.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center,
-            ) {
-                Row(
-                    modifier = Modifier
-                        .clip(CircleShape)
-                        .background(Color.White.copy(alpha = 0.09f))
-                        .border(1.dp, Color.White.copy(alpha = 0.14f), CircleShape)
-                        .padding(horizontal = 4.dp, vertical = 2.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(2.dp),
-                ) {
-                    IconButton(onClick = { onAdjustOffset(-250L) }, modifier = Modifier.size(34.dp)) {
-                        Icon(
-                            imageVector = Icons.Rounded.Remove,
-                            contentDescription = "Perlambat lirik 0,25 detik",
-                            tint = Color.White.copy(alpha = 0.80f),
-                            modifier = Modifier.size(16.dp),
-                        )
-                    }
-                    Box(
-                        modifier = Modifier
-                            .clip(CircleShape)
-                            .clickable(onClick = onResetOffset)
-                            .padding(horizontal = 8.dp, vertical = 4.dp),
-                    ) {
-                        val sec = playerState.lyricsOffsetMs / 1000.0
-                        val label = buildString {
-                            if (playerState.lyricsOffsetMs == 0L) {
-                                append("Sinkron")
-                            } else {
-                                append(String.format(Locale("id", "ID"), "%+.2f dtk", sec))
-                            }
-                            playerState.lyricsProviderLabel?.let { append(" · $it") }
-                        }
-                        Text(
-                            text = label,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = Color.White.copy(alpha = 0.84f),
-                        )
-                    }
-                    IconButton(onClick = { onAdjustOffset(250L) }, modifier = Modifier.size(34.dp)) {
-                        Icon(
-                            imageVector = Icons.Rounded.Add,
-                            contentDescription = "Percepat lirik 0,25 detik",
-                            tint = Color.White.copy(alpha = 0.80f),
-                            modifier = Modifier.size(16.dp),
-                        )
-                    }
-                }
-            }
-        }
     }
+    @Suppress("UNUSED_EXPRESSION")
+    listOf(onAdjustOffset, onResetOffset)
 }
 
 /**
@@ -266,8 +211,9 @@ fun MupaSyncedLyricsList(
         }
     }
 
-    LaunchedEffect(listState.isScrollInProgress) {
-        if (listState.isScrollInProgress) {
+    val isUserDragging by listState.interactionSource.collectIsDraggedAsState()
+    LaunchedEffect(isUserDragging) {
+        if (isUserDragging) {
             lastUserScrollMs = System.currentTimeMillis()
             userScrolledAway = true
         }

@@ -74,4 +74,6 @@ data class UserPreferences(
     val stripArtistName: Boolean = true,
     val activeSource: AudioSourceType = AudioSourceType.STREAMING,
     val crossfadeSeconds: Int = 5,
+    /** 0 = Rendah (Aman), 1 = Sedang, 2 = Cepat */
+    val playerSwipeSensitivity: Int = 1,
 )

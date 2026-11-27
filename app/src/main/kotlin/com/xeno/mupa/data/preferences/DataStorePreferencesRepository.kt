@@ -50,6 +50,7 @@ class DataStorePreferencesRepository @Inject constructor(
                 stripArtistName = prefs[KEY_STRIP_ARTIST_NAME] ?: true,
                 activeSource = activeSource,
                 crossfadeSeconds = (prefs[KEY_CROSSFADE_SECONDS] ?: 5).coerceIn(0, 12),
+                playerSwipeSensitivity = (prefs[KEY_PLAYER_SWIPE_SENSITIVITY] ?: 1).coerceIn(0, 2),
             )
         }
 
@@ -109,6 +110,12 @@ class DataStorePreferencesRepository @Inject constructor(
         }
     }
 
+    override suspend fun setPlayerSwipeSensitivity(level: Int) {
+        dataStore.edit { prefs ->
+            prefs[KEY_PLAYER_SWIPE_SENSITIVITY] = level.coerceIn(0, 2)
+        }
+    }
+
     private companion object {
         val KEY_ONBOARDING_COMPLETED = booleanPreferencesKey("onboarding_completed")
         val KEY_FAVORITE_ARTIST_IDS = stringSetPreferencesKey("favorite_artist_ids")
@@ -120,5 +127,6 @@ class DataStorePreferencesRepository @Inject constructor(
         val KEY_STRIP_ARTIST_NAME = booleanPreferencesKey("strip_artist_name")
         val KEY_ACTIVE_SOURCE = stringPreferencesKey("active_source")
         val KEY_CROSSFADE_SECONDS = intPreferencesKey("crossfade_seconds")
+        val KEY_PLAYER_SWIPE_SENSITIVITY = intPreferencesKey("player_swipe_sensitivity")
     }
 }

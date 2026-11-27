@@ -78,6 +78,7 @@ fun MupaApp(
     onPerformanceModeChange: (Boolean) -> Unit,
     onStripArtistNameChange: (Boolean) -> Unit,
     onCrossfadeSecondsChange: (Int) -> Unit = {},
+    onPlayerSwipeSensitivityChange: (Int) -> Unit = {},
     onOpenEditFavoriteArtists: () -> Unit,
     onCloseEditFavoriteArtists: () -> Unit,
     onTogglePlayPause: () -> Unit,
@@ -206,6 +207,7 @@ fun MupaApp(
                     onPerformanceModeChange = onPerformanceModeChange,
                     onStripArtistNameChange = onStripArtistNameChange,
                     onCrossfadeSecondsChange = onCrossfadeSecondsChange,
+                    onPlayerSwipeSensitivityChange = onPlayerSwipeSensitivityChange,
                     onEditFavoriteArtists = onOpenEditFavoriteArtists,
                     continueTrack = playerState.currentTrack,
                     continueQueue = playerState.queue,
@@ -314,6 +316,7 @@ fun MupaApp(
                         onMoveQueueItem = onMoveQueueItem,
                         onRemoveQueueItem = onRemoveQueueItem,
                         onClearUpcomingQueue = onClearUpcomingQueue,
+                        swipeSensitivity = uiState.preferences.playerSwipeSensitivity,
                     )
 
                     val navSlidePx = with(density) { (navBarBottom + 88.dp).toPx() }

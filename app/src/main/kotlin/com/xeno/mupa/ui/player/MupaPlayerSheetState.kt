@@ -155,13 +155,17 @@ class MupaPlayerSheetState(
         }
     }
 
-    /** Lepas drag: tuntaskan ke status terdekat lewat tween proporsional (min 250 ms, 0 overshoot; ambang aman tidak sensitif). */
-    fun onDragEnd(velocityYPxPerSec: Float) {
+    /** Lepas drag: tuntaskan ke status terdekat lewat tween proporsional (min 250 ms, 0 overshoot). */
+    fun onDragEnd(
+        velocityYPxPerSec: Float,
+        collapseVelocityThreshold: Float = 950f,
+        stayExpandedMinProgress: Float = 0.65f,
+    ) {
         isDragging = false
         val shouldExpand = when {
             velocityYPxPerSec < -650f -> true
-            velocityYPxPerSec > 950f -> false
-            else -> animatable.value >= 0.65f
+            velocityYPxPerSec > collapseVelocityThreshold -> false
+            else -> animatable.value >= stayExpandedMinProgress
         }
         val target = if (shouldExpand) 1f else 0f
         val durationMs = MupaPlayerMorphMath.proportionalReleaseDurationMs(animatable.value, target)

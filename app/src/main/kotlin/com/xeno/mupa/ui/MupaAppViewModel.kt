@@ -139,6 +139,10 @@ class MupaAppViewModel @Inject constructor(
         viewModelScope.launch { preferencesRepository.setCrossfadeSeconds(clamped) }
     }
 
+    fun setPlayerSwipeSensitivity(level: Int) {
+        viewModelScope.launch { preferencesRepository.setPlayerSwipeSensitivity(level.coerceIn(0, 2)) }
+    }
+
     fun importLocalFiles(uris: List<Uri>) {
         viewModelScope.launch { localLibraryRepository.importAudioFiles(uris) }
     }

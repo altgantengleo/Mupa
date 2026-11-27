@@ -77,6 +77,7 @@ class MainActivity : ComponentActivity() {
                     onPerformanceModeChange = appViewModel::setPerformanceMode,
                     onStripArtistNameChange = appViewModel::setStripArtistName,
                     onCrossfadeSecondsChange = appViewModel::setCrossfadeSeconds,
+                    onPlayerSwipeSensitivityChange = appViewModel::setPlayerSwipeSensitivity,
                     onOpenEditFavoriteArtists = appViewModel::openEditFavoriteArtists,
                     onCloseEditFavoriteArtists = appViewModel::closeEditFavoriteArtists,
                     onTogglePlayPause = playerViewModel::togglePlayPause,
