@@ -66,10 +66,12 @@ class MupaCrossfadeEngine(
     private val context: Context,
     private val primaryPlayer: ExoPlayer,
     private val dataSourceFactory: DataSource.Factory,
-    private val customAudioProcessors: List<AudioProcessor>,
+    private val audioProcessorsFactory: () -> List<AudioProcessor>,
+    private val onReleaseProcessors: (List<AudioProcessor>) -> Unit = {},
 ) {
     private val handler = Handler(Looper.getMainLooper())
     private var deckPlayer: ExoPlayer? = null
+    private var deckProcessors: List<AudioProcessor> = emptyList()
 
     private var stagedMediaId: String? = null
     private var stagedTargetIndex: Int = C.INDEX_UNSET
@@ -150,6 +152,10 @@ class MupaCrossfadeEngine(
             deckPlayer?.release()
         }
         deckPlayer = null
+        if (deckProcessors.isNotEmpty()) {
+            runCatching { onReleaseProcessors(deckProcessors) }
+            deckProcessors = emptyList()
+        }
     }
 
     private fun schedulePollIfNeeded() {
@@ -161,6 +167,9 @@ class MupaCrossfadeEngine(
 
     private fun ensureDeckPlayer(): ExoPlayer {
         deckPlayer?.let { return it }
+        // Wajib membuat instance AudioProcessor terpisah agar tidak bentrok ByteBuffer dengan primaryPlayer
+        val freshProcessors = audioProcessorsFactory()
+        deckProcessors = freshProcessors
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(8_000, 16_000, 1_000, 2_000)
             .setPrioritizeTimeOverSizeThresholds(true)
@@ -173,7 +182,7 @@ class MupaCrossfadeEngine(
             ): AudioSink = DefaultAudioSink.Builder(ctx)
                 .setEnableFloatOutput(enableFloatOutput)
                 .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
-                .setAudioProcessors(customAudioProcessors.toTypedArray())
+                .setAudioProcessors(freshProcessors.toTypedArray())
                 .build()
         }.setEnableDecoderFallback(true)
 
@@ -307,24 +316,35 @@ class MupaCrossfadeEngine(
             primaryPlayer.play()
         }
 
-        // Micro-ramp 40ms pada dek sekunder untuk mencegah bunyi klik/pop audio
-        handler.postDelayed(
-            {
-                runCatching {
-                    deck.volume = 0f
-                    deck.pause()
-                    deck.stop()
-                    deck.clearMediaItems()
+        // Tunggu primaryPlayer STATE_READY (maks 240ms) sebelum micro-ramp 40ms dek sekunder
+        val handoffDeadlineMs = System.currentTimeMillis() + HANDOFF_WAIT_MAX_MS
+        val finishHandoffRunnable = object : Runnable {
+            override fun run() {
+                val ready = primaryPlayer.playbackState == Player.STATE_READY
+                if (!ready && System.currentTimeMillis() < handoffDeadlineMs) {
+                    handler.postDelayed(this, HANDOFF_WAIT_POLL_MS)
+                    return
                 }
-                stagedMediaId = null
-                stagedTargetIndex = C.INDEX_UNSET
-                isDeckReady = false
-                handoffTargetIndex = C.INDEX_UNSET
-                isPerformingHandoff = false
-                schedulePollIfNeeded()
-            },
-            MICRO_RAMP_MS,
-        )
+                handler.postDelayed(
+                    {
+                        runCatching {
+                            deck.volume = 0f
+                            deck.pause()
+                            deck.stop()
+                            deck.clearMediaItems()
+                        }
+                        stagedMediaId = null
+                        stagedTargetIndex = C.INDEX_UNSET
+                        isDeckReady = false
+                        handoffTargetIndex = C.INDEX_UNSET
+                        isPerformingHandoff = false
+                        schedulePollIfNeeded()
+                    },
+                    MICRO_RAMP_MS,
+                )
+            }
+        }
+        handler.post(finishHandoffRunnable)
     }
 
     private fun cancelCrossfade(resetPrimaryVolume: Boolean) {
@@ -359,6 +379,8 @@ class MupaCrossfadeEngine(
         private const val PRE_STAGE_LEAD_MS = 5_000L
         private const val MIN_TRIGGER_REMAINING_MS = 500L
         private const val HANDOFF_LEAD_MS = 90L
+        private const val HANDOFF_WAIT_POLL_MS = 20L
+        private const val HANDOFF_WAIT_MAX_MS = 240L
         private const val MICRO_RAMP_MS = 40L
     }
 }

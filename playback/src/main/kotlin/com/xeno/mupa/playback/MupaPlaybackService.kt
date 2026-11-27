@@ -120,7 +120,20 @@ class MupaPlaybackService : MediaLibraryService() {
             context = this,
             primaryPlayer = exoPlayer,
             dataSourceFactory = resolvingFactory,
-            customAudioProcessors = customAudioProcessors,
+            audioProcessorsFactory = {
+                customAudioProcessors.mapNotNull { processor ->
+                    when (processor) {
+                        is com.xeno.mupa.playback.eq.FiveBandEqualizerProcessor -> processor.createSyncedClone()
+                        else -> null
+                    }
+                }
+            },
+            onReleaseProcessors = { clones ->
+                val eqMasters = customAudioProcessors.filterIsInstance<com.xeno.mupa.playback.eq.FiveBandEqualizerProcessor>()
+                clones.filterIsInstance<com.xeno.mupa.playback.eq.FiveBandEqualizerProcessor>().forEach { clone ->
+                    eqMasters.forEach { master -> master.removeSyncedClone(clone) }
+                }
+            },
         ).also { it.attach() }
         mediaLibrarySession = MediaLibrarySession.Builder(
             this,

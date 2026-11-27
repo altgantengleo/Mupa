@@ -1,5 +1,12 @@
 package com.xeno.mupa.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.PaddingValues
@@ -16,7 +23,9 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
@@ -33,6 +42,7 @@ import com.xeno.mupa.core.designsystem.component.UltraDynamicBackground
 import com.xeno.mupa.core.designsystem.theme.LocalMupaAppearance
 import com.xeno.mupa.core.designsystem.theme.LocalMupaHazeState
 import com.xeno.mupa.core.designsystem.theme.LocalPlayerChromeInsets
+import com.xeno.mupa.core.designsystem.theme.MupaMotion
 import com.xeno.mupa.core.designsystem.theme.PlayerChromeInsets
 import com.xeno.mupa.core.model.GlassStyle
 import com.xeno.mupa.core.model.Track
@@ -109,27 +119,21 @@ fun MupaApp(
         return
     }
 
-    // Onboarding Artis Favorit wajib saat pertama kali dibuka, atau mode edit dari Akun/Pengaturan
-    val showOnboarding = !uiState.preferences.onboardingCompleted || uiState.isEditingFavoriteArtists
-    if (showOnboarding) {
-        val isEditMode = uiState.preferences.onboardingCompleted && uiState.isEditingFavoriteArtists
+    // Onboarding Artis Favorit wajib saat pertama kali dibuka
+    if (!uiState.preferences.onboardingCompleted) {
         val onboardingVm: ArtistOnboardingViewModel = hiltViewModel()
         val onboardingState by onboardingVm.uiState.collectAsStateWithLifecycle()
 
         ArtistOnboardingScreen(
             uiState = onboardingState,
-            isEditMode = isEditMode,
+            isEditMode = false,
             onQueryChange = onboardingVm::onQueryChange,
             onToggleArtist = onboardingVm::toggleArtist,
             onRetry = onboardingVm::retry,
             onSubmit = {
-                onboardingVm.submitSelection(isEditMode = isEditMode) {
-                    if (isEditMode) onCloseEditFavoriteArtists()
-                }
+                onboardingVm.submitSelection(isEditMode = false) {}
             },
-            onNavigateBackOrExit = {
-                if (isEditMode) onCloseEditFavoriteArtists() else onExitApp()
-            },
+            onNavigateBackOrExit = onExitApp,
             modifier = modifier,
         )
         return
@@ -140,6 +144,10 @@ fun MupaApp(
     val currentRoute = backStackEntry?.destination?.route
     val currentDestination = MupaTopLevelDestination.entries.firstOrNull {
         it.route == currentRoute
+    }
+    var lastTopLevelDestination by remember { mutableStateOf(MupaTopLevelDestination.HOME) }
+    if (currentDestination != null) {
+        lastTopLevelDestination = currentDestination
     }
     val showBottomBar = currentDestination != null
 
@@ -245,74 +253,125 @@ fun MupaApp(
                 }
             }
 
-            // Scrim gradasi bawah menutup penuh celah Mini Player <-> Bottom Nav dan belakang Liquid+ (perbaikan B1 & N2)
-            if (showBottomBar) {
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .fillMaxWidth()
-                        .height(chromeHeight + 28.dp)
-                        .graphicsLayer {
-                            val p = playerSheetState.progress
-                            alpha = (1f - p / 0.35f).coerceIn(0f, 1f)
-                        }
-                        .background(
-                            Brush.verticalGradient(
-                                0.0f to Color.Transparent,
-                                0.16f to bgColor.copy(alpha = 0.90f),
-                                0.45f to bgColor.copy(alpha = 0.97f),
-                                1.0f to bgColor.copy(alpha = 0.99f),
+            // Scrim gradasi bawah + Mini Player + Bottom Nav beranimasi halus saat masuk/keluar Pengaturan
+            AnimatedVisibility(
+                visible = showBottomBar,
+                enter = slideInVertically(
+                    animationSpec = MupaMotion.emphasizedTween(320),
+                    initialOffsetY = { (it * 0.35f).toInt() },
+                ) + fadeIn(animationSpec = MupaMotion.standardTween(220)),
+                exit = slideOutVertically(
+                    animationSpec = MupaMotion.emphasizedTween(260),
+                    targetOffsetY = { (it * 0.35f).toInt() },
+                ) + fadeOut(animationSpec = MupaMotion.standardTween(180)),
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                Box(modifier = Modifier.fillMaxSize()) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .fillMaxWidth()
+                            .height(chromeHeight + 28.dp)
+                            .graphicsLayer {
+                                val p = playerSheetState.progress
+                                alpha = (1f - p / 0.35f).coerceIn(0f, 1f)
+                            }
+                            .background(
+                                Brush.verticalGradient(
+                                    0.0f to Color.Transparent,
+                                    0.16f to bgColor.copy(alpha = 0.90f),
+                                    0.45f to bgColor.copy(alpha = 0.97f),
+                                    1.0f to bgColor.copy(alpha = 0.99f),
+                                ),
                             ),
-                        ),
-                )
+                    )
 
-                MupaPlayerOverlayHost(
-                    playerState = playerState,
-                    sheetState = playerSheetState,
-                    stripArtistName = uiState.preferences.stripArtistName,
-                    bottomBarClearance = navBarBottom + 64.dp + 12.dp + 8.dp,
-                    positionProvider = positionProvider,
-                    onTogglePlayPause = onTogglePlayPause,
-                    onSeekTo = onSeekTo,
-                    onSkipNext = onSkipNext,
-                    onSkipPrevious = onSkipPrevious,
-                    onToggleShuffle = onToggleShuffle,
-                    onCycleRepeat = onCycleRepeat,
-                    onToggleFavorite = onToggleFavorite,
-                    onOpenOverlay = onOpenOverlay,
-                    onCloseOverlay = onCloseOverlay,
-                    onOpenCinema = onOpenCinema,
-                    onCloseCinema = onCloseCinema,
-                    onRetryLyrics = onRetryLyrics,
-                    onAdjustLyricsOffset = onAdjustLyricsOffset,
-                    onResetLyricsOffset = onResetLyricsOffset,
-                    onCycleSleepTimer = onCycleSleepTimer,
-                    onSelectEqPreset = onSelectEqPreset,
-                    onEqBandChange = onEqBandChange,
-                    onResetEq = onResetEq,
-                    onSelectQueueIndex = onSelectQueueIndex,
-                    onMoveQueueItem = onMoveQueueItem,
-                    onRemoveQueueItem = onRemoveQueueItem,
-                    onClearUpcomingQueue = onClearUpcomingQueue,
-                )
+                    MupaPlayerOverlayHost(
+                        playerState = playerState,
+                        sheetState = playerSheetState,
+                        stripArtistName = uiState.preferences.stripArtistName,
+                        bottomBarClearance = navBarBottom + 64.dp + 12.dp + 8.dp,
+                        positionProvider = positionProvider,
+                        onTogglePlayPause = onTogglePlayPause,
+                        onSeekTo = onSeekTo,
+                        onSkipNext = onSkipNext,
+                        onSkipPrevious = onSkipPrevious,
+                        onToggleShuffle = onToggleShuffle,
+                        onCycleRepeat = onCycleRepeat,
+                        onToggleFavorite = onToggleFavorite,
+                        onOpenOverlay = onOpenOverlay,
+                        onCloseOverlay = onCloseOverlay,
+                        onOpenCinema = onOpenCinema,
+                        onCloseCinema = onCloseCinema,
+                        onRetryLyrics = onRetryLyrics,
+                        onAdjustLyricsOffset = onAdjustLyricsOffset,
+                        onResetLyricsOffset = onResetLyricsOffset,
+                        onCycleSleepTimer = onCycleSleepTimer,
+                        onSelectEqPreset = onSelectEqPreset,
+                        onEqBandChange = onEqBandChange,
+                        onResetEq = onResetEq,
+                        onSelectQueueIndex = onSelectQueueIndex,
+                        onMoveQueueItem = onMoveQueueItem,
+                        onRemoveQueueItem = onRemoveQueueItem,
+                        onClearUpcomingQueue = onClearUpcomingQueue,
+                    )
 
-                val navSlidePx = with(density) { (navBarBottom + 88.dp).toPx() }
-                MupaFloatingBottomBar(
-                    currentDestination = currentDestination,
-                    onSelectDestination = { destination ->
-                        if (destination != currentDestination) {
-                            navController.navigateToTopLevel(destination)
+                    val navSlidePx = with(density) { (navBarBottom + 88.dp).toPx() }
+                    MupaFloatingBottomBar(
+                        currentDestination = currentDestination ?: lastTopLevelDestination,
+                        onSelectDestination = { destination ->
+                            if (destination != currentDestination) {
+                                navController.navigateToTopLevel(destination)
+                            }
+                        },
+                        modifier = Modifier
+                            .align(Alignment.BottomCenter)
+                            .navigationBarsPadding()
+                            .padding(horizontal = 20.dp, vertical = 12.dp)
+                            .graphicsLayer {
+                                val p = playerSheetState.progress
+                                translationY = navSlidePx * MupaPlayerMorphMath.bottomNavSlideFraction(p)
+                                alpha = MupaPlayerMorphMath.bottomNavAlpha(p)
+                            },
+                    )
+                }
+            }
+
+            // Overlay beranimasi halus untuk Ubah Artis Favorit (tidak mereset tab Akun)
+            AnimatedVisibility(
+                visible = uiState.isEditingFavoriteArtists,
+                enter = slideInVertically(
+                    animationSpec = MupaMotion.emphasizedTween(MupaMotion.DurationSheetMs),
+                    initialOffsetY = { (it * 0.16f).toInt() },
+                ) + fadeIn(animationSpec = MupaMotion.standardTween(220)) + scaleIn(
+                    initialScale = 0.97f,
+                    animationSpec = MupaMotion.emphasizedTween(MupaMotion.DurationSheetMs),
+                ),
+                exit = slideOutVertically(
+                    animationSpec = MupaMotion.emphasizedTween(280),
+                    targetOffsetY = { (it * 0.16f).toInt() },
+                ) + fadeOut(animationSpec = MupaMotion.standardTween(180)) + scaleOut(
+                    targetScale = 0.97f,
+                    animationSpec = MupaMotion.emphasizedTween(280),
+                ),
+                modifier = Modifier.fillMaxSize(),
+            ) {
+                val onboardingVm: ArtistOnboardingViewModel = hiltViewModel()
+                val onboardingState by onboardingVm.uiState.collectAsStateWithLifecycle()
+
+                ArtistOnboardingScreen(
+                    uiState = onboardingState,
+                    isEditMode = true,
+                    onQueryChange = onboardingVm::onQueryChange,
+                    onToggleArtist = onboardingVm::toggleArtist,
+                    onRetry = onboardingVm::retry,
+                    onSubmit = {
+                        onboardingVm.submitSelection(isEditMode = true) {
+                            onCloseEditFavoriteArtists()
                         }
                     },
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .navigationBarsPadding()
-                        .padding(horizontal = 20.dp, vertical = 12.dp)
-                        .graphicsLayer {
-                            val p = playerSheetState.progress
-                            translationY = navSlidePx * MupaPlayerMorphMath.bottomNavSlideFraction(p)
-                            alpha = MupaPlayerMorphMath.bottomNavAlpha(p)
-                        },
+                    onNavigateBackOrExit = onCloseEditFavoriteArtists,
+                    modifier = Modifier.fillMaxSize(),
                 )
             }
         }

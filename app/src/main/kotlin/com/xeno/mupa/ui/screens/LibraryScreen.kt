@@ -2,6 +2,12 @@ package com.xeno.mupa.ui.screens
 
 import android.net.Uri
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -79,6 +85,7 @@ import com.xeno.mupa.core.designsystem.component.MupaSourceSwitch
 import com.xeno.mupa.core.designsystem.component.MupaTextButton
 import com.xeno.mupa.core.designsystem.component.MupaTrackRow
 import com.xeno.mupa.core.designsystem.component.MupaTrackRowSkeleton
+import com.xeno.mupa.core.designsystem.theme.MupaMotion
 import com.xeno.mupa.core.designsystem.theme.MupaPalette
 import com.xeno.mupa.core.designsystem.theme.MupaRadii
 import com.xeno.mupa.core.designsystem.theme.MupaSpacing
@@ -367,30 +374,54 @@ fun LibraryScreen(
         onExtraToggleChange = onSetFavoritesOnly,
     )
 
-    val openCategory = uiState.openCategory
-    if (openCategory != null) {
-        LibraryCategoryDetailList(
-            category = openCategory,
-            uiState = uiState,
-            stripArtistName = stripArtistName,
-            currentPlayingTrackId = currentPlayingTrackId,
-            contentPadding = contentPadding,
-            onBack = onCloseCategory,
-            onOpenFilter = { showFilterSheet = true },
-            onRemoveLocalTrack = onRemoveLocalTrack,
-            onToggleFavoriteTrack = onToggleFavoriteTrack,
-            onPlayTrack = onPlayTrack,
-            onPlayShuffled = onPlayShuffled,
-            modifier = modifier,
-        )
-        return
-    }
-
-    LazyColumn(
+    AnimatedContent(
+        targetState = uiState.openCategory,
+        transitionSpec = {
+            val openingDetail = targetState != null
+            if (openingDetail) {
+                (slideInHorizontally(
+                    animationSpec = MupaMotion.emphasizedTween(300),
+                    initialOffsetX = { fullWidth -> (fullWidth * 0.24f).toInt() },
+                ) + fadeIn(animationSpec = MupaMotion.standardTween(200))) togetherWith
+                    (slideOutHorizontally(
+                        animationSpec = MupaMotion.emphasizedTween(300),
+                        targetOffsetX = { fullWidth -> -(fullWidth * 0.10f).toInt() },
+                    ) + fadeOut(animationSpec = MupaMotion.standardTween(160)))
+            } else {
+                (slideInHorizontally(
+                    animationSpec = MupaMotion.emphasizedTween(280),
+                    initialOffsetX = { fullWidth -> -(fullWidth * 0.10f).toInt() },
+                ) + fadeIn(animationSpec = MupaMotion.standardTween(200))) togetherWith
+                    (slideOutHorizontally(
+                        animationSpec = MupaMotion.emphasizedTween(280),
+                        targetOffsetX = { fullWidth -> (fullWidth * 0.24f).toInt() },
+                    ) + fadeOut(animationSpec = MupaMotion.standardTween(160)))
+            }
+        },
+        label = "library_category_transition",
         modifier = modifier.fillMaxSize(),
-        contentPadding = contentPadding,
-        verticalArrangement = Arrangement.spacedBy(14.dp),
-    ) {
+    ) { openCategory ->
+        if (openCategory != null) {
+            LibraryCategoryDetailList(
+                category = openCategory,
+                uiState = uiState,
+                stripArtistName = stripArtistName,
+                currentPlayingTrackId = currentPlayingTrackId,
+                contentPadding = contentPadding,
+                onBack = onCloseCategory,
+                onOpenFilter = { showFilterSheet = true },
+                onRemoveLocalTrack = onRemoveLocalTrack,
+                onToggleFavoriteTrack = onToggleFavoriteTrack,
+                onPlayTrack = onPlayTrack,
+                onPlayShuffled = onPlayShuffled,
+                modifier = Modifier.fillMaxSize(),
+            )
+        } else {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = contentPadding,
+                verticalArrangement = Arrangement.spacedBy(14.dp),
+            ) {
         // Header Pustaka + Switch Awan (Streaming) / Ponsel (Lokal)
         item(key = "lib_header") {
             Row(
@@ -605,6 +636,8 @@ fun LibraryScreen(
                     }
                 }
             }
+        }
+        }
         }
     }
 }

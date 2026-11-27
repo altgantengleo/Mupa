@@ -56,8 +56,24 @@ class FiveBandEqualizerProcessor : BaseAudioProcessor() {
     private var z1: Array<DoubleArray> = Array(2) { DoubleArray(BAND_COUNT) }
     private var z2: Array<DoubleArray> = Array(2) { DoubleArray(BAND_COUNT) }
 
+    // Klon tersinkron untuk dek sekunder crossfade agar tiap ExoPlayer punya ByteBuffer & state filter terpisah
+    private val syncedClones = java.util.concurrent.CopyOnWriteArrayList<FiveBandEqualizerProcessor>()
+
+    fun createSyncedClone(): FiveBandEqualizerProcessor {
+        val clone = FiveBandEqualizerProcessor()
+        clone.setEnabled(enabled)
+        clone.setBandGains(gainsDb.toList())
+        syncedClones.add(clone)
+        return clone
+    }
+
+    fun removeSyncedClone(clone: FiveBandEqualizerProcessor) {
+        syncedClones.remove(clone)
+    }
+
     fun setEnabled(isEnabled: Boolean) {
         enabled = isEnabled
+        syncedClones.forEach { it.setEnabled(isEnabled) }
     }
 
     fun setBandGains(newGainsDb: List<Float>) {
@@ -66,6 +82,8 @@ class FiveBandEqualizerProcessor : BaseAudioProcessor() {
         }
         gainsDb = clamped
         coeffs = computeAllCoeffs(sampleRateHz, clamped)
+        val snapshot = clamped.toList()
+        syncedClones.forEach { it.setBandGains(snapshot) }
     }
 
     fun currentGains(): List<Float> = gainsDb.toList()

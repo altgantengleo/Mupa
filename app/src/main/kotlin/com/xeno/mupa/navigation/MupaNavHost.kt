@@ -4,6 +4,8 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.layout.PaddingValues
@@ -113,37 +115,99 @@ fun MupaNavHost(
         pickFolderLauncher.launch(null)
     }
 
+    val subRoutes = setOf(
+        MupaRoutes.SETTINGS,
+        MupaRoutes.ATTRIBUTION,
+        MupaRoutes.EQUALIZER,
+    )
+
     NavHost(
         navController = navController,
         startDestination = MupaTopLevelDestination.HOME.route,
         modifier = modifier,
         enterTransition = {
-            val from = tabOrder[initialState.destination.route] ?: 0
-            val to = tabOrder[targetState.destination.route] ?: 0
-            val direction = if (to >= from) 1 else -1
-            slideInHorizontally(
-                animationSpec = MupaMotion.emphasizedTween(MupaMotion.DurationMediumMs),
-                initialOffsetX = { fullWidth -> (fullWidth / 14) * direction },
-            ) + fadeIn(
-                animationSpec = MupaMotion.standardTween(MupaMotion.DurationShortMs),
-            )
+            val targetRoute = targetState.destination.route
+            if (targetRoute in subRoutes) {
+                // Buka Pengaturan / Atribusi / Equalizer: luncur halus dari kanan + fade + skala tenang
+                slideInHorizontally(
+                    animationSpec = MupaMotion.emphasizedTween(MupaMotion.DurationSheetMs),
+                    initialOffsetX = { fullWidth -> (fullWidth * 0.28f).toInt() },
+                ) + fadeIn(
+                    animationSpec = MupaMotion.standardTween(220),
+                ) + scaleIn(
+                    initialScale = 0.97f,
+                    animationSpec = MupaMotion.emphasizedTween(MupaMotion.DurationSheetMs),
+                )
+            } else {
+                val from = tabOrder[initialState.destination.route] ?: 0
+                val to = tabOrder[targetRoute] ?: 0
+                val direction = if (to >= from) 1 else -1
+                slideInHorizontally(
+                    animationSpec = MupaMotion.emphasizedTween(MupaMotion.DurationMediumMs),
+                    initialOffsetX = { fullWidth -> (fullWidth / 12) * direction },
+                ) + fadeIn(
+                    animationSpec = MupaMotion.standardTween(MupaMotion.DurationShortMs),
+                )
+            }
         },
         exitTransition = {
-            val from = tabOrder[initialState.destination.route] ?: 0
-            val to = tabOrder[targetState.destination.route] ?: 0
-            val direction = if (to >= from) -1 else 1
-            slideOutHorizontally(
-                animationSpec = MupaMotion.emphasizedTween(MupaMotion.DurationMediumMs),
-                targetOffsetX = { fullWidth -> (fullWidth / 14) * direction },
-            ) + fadeOut(
-                animationSpec = MupaMotion.standardTween(MupaMotion.DurationShortMs),
-            )
+            val targetRoute = targetState.destination.route
+            if (targetRoute in subRoutes) {
+                // Layar sebelumnya mundur lembut ke kiri dengan paralaks saat sub-layar dibuka
+                slideOutHorizontally(
+                    animationSpec = MupaMotion.emphasizedTween(MupaMotion.DurationSheetMs),
+                    targetOffsetX = { fullWidth -> -(fullWidth * 0.12f).toInt() },
+                ) + fadeOut(
+                    animationSpec = MupaMotion.standardTween(200),
+                ) + scaleOut(
+                    targetScale = 0.96f,
+                    animationSpec = MupaMotion.emphasizedTween(MupaMotion.DurationSheetMs),
+                )
+            } else {
+                val from = tabOrder[initialState.destination.route] ?: 0
+                val to = tabOrder[targetRoute] ?: 0
+                val direction = if (to >= from) -1 else 1
+                slideOutHorizontally(
+                    animationSpec = MupaMotion.emphasizedTween(MupaMotion.DurationMediumMs),
+                    targetOffsetX = { fullWidth -> (fullWidth / 12) * direction },
+                ) + fadeOut(
+                    animationSpec = MupaMotion.standardTween(MupaMotion.DurationShortMs),
+                )
+            }
         },
         popEnterTransition = {
-            fadeIn(animationSpec = MupaMotion.standardTween(MupaMotion.DurationShortMs))
+            val initialRoute = initialState.destination.route
+            if (initialRoute in subRoutes) {
+                // Kembali dari Pengaturan / Atribusi / Equalizer: layar asal masuk lembut dari kiri
+                slideInHorizontally(
+                    animationSpec = MupaMotion.emphasizedTween(320),
+                    initialOffsetX = { fullWidth -> -(fullWidth * 0.12f).toInt() },
+                ) + fadeIn(
+                    animationSpec = MupaMotion.standardTween(220),
+                ) + scaleIn(
+                    initialScale = 0.96f,
+                    animationSpec = MupaMotion.emphasizedTween(320),
+                )
+            } else {
+                fadeIn(animationSpec = MupaMotion.standardTween(MupaMotion.DurationShortMs))
+            }
         },
         popExitTransition = {
-            fadeOut(animationSpec = MupaMotion.standardTween(MupaMotion.DurationShortMs))
+            val initialRoute = initialState.destination.route
+            if (initialRoute in subRoutes) {
+                // Tutup Pengaturan / Atribusi / Equalizer: luncur halus keluar ke kanan
+                slideOutHorizontally(
+                    animationSpec = MupaMotion.emphasizedTween(300),
+                    targetOffsetX = { fullWidth -> (fullWidth * 0.28f).toInt() },
+                ) + fadeOut(
+                    animationSpec = MupaMotion.standardTween(190),
+                ) + scaleOut(
+                    targetScale = 0.97f,
+                    animationSpec = MupaMotion.emphasizedTween(300),
+                )
+            } else {
+                fadeOut(animationSpec = MupaMotion.standardTween(MupaMotion.DurationShortMs))
+            }
         },
     ) {
         composable(MupaTopLevelDestination.HOME.route) {
