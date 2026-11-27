@@ -1,8 +1,8 @@
 package com.xeno.mupa.ui.screens
 
+import android.graphics.Bitmap
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,27 +18,50 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Cloud
 import androidx.compose.material.icons.rounded.LibraryMusic
+import androidx.compose.material.icons.rounded.MusicNote
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.Refresh
-import androidx.compose.material.icons.rounded.Smartphone
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
-import com.xeno.mupa.core.designsystem.component.MupaArtworkBox
+import coil3.ImageLoader
+import coil3.compose.AsyncImage
+import coil3.request.ImageRequest
+import coil3.request.SuccessResult
+import coil3.request.allowHardware
+import coil3.request.crossfade
+import coil3.toBitmap
 import com.xeno.mupa.core.designsystem.component.MupaCoverCard
 import com.xeno.mupa.core.designsystem.component.MupaCoverCardSkeleton
 import com.xeno.mupa.core.designsystem.component.MupaEmptyState
@@ -47,17 +70,25 @@ import com.xeno.mupa.core.designsystem.component.MupaLogoGlyph
 import com.xeno.mupa.core.designsystem.component.MupaPrimaryButton
 import com.xeno.mupa.core.designsystem.component.MupaSectionHeader
 import com.xeno.mupa.core.designsystem.component.MupaSkeletonBox
+import com.xeno.mupa.core.designsystem.component.MupaSourceSwitch
+import com.xeno.mupa.core.designsystem.component.UltraDynamicBackground
+import com.xeno.mupa.core.designsystem.theme.LocalMupaAppearance
 import com.xeno.mupa.core.designsystem.theme.MupaPalette
 import com.xeno.mupa.core.designsystem.theme.MupaRadii
 import com.xeno.mupa.core.designsystem.theme.MupaSpacing
+import com.xeno.mupa.core.designsystem.theme.UltraDynamicPalette
+import com.xeno.mupa.core.designsystem.theme.UltraDynamicPaletteCache
+import com.xeno.mupa.core.domain.ArtistRepository
 import com.xeno.mupa.core.domain.MusicSource
 import com.xeno.mupa.core.domain.PreferencesRepository
+import com.xeno.mupa.core.model.Artist
 import com.xeno.mupa.core.model.AudioSourceType
 import com.xeno.mupa.core.model.Playlist
 import com.xeno.mupa.core.model.Track
 import com.xeno.mupa.core.model.TrackDisplayRules
 import com.xeno.mupa.data.local.LocalLibraryRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -66,14 +97,37 @@ import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
 import java.util.Calendar
 import javax.inject.Inject
+
+enum class HomeHeroKind {
+    MIX_MUPA,
+    ARTIST_SPOTLIGHT,
+    CONTINUE_LISTENING,
+}
+
+@Immutable
+data class HomeHeroPage(
+    val id: String,
+    val kind: HomeHeroKind,
+    val kicker: String,
+    val title: String,
+    val subtitle: String,
+    val artworkUrl: String?,
+    val tracks: List<Track>,
+    val initialTrackIndex: Int = 0,
+    val canReshuffle: Boolean = false,
+    val palette: UltraDynamicPalette? = null,
+)
 
 @Immutable
 data class HomeUiState(
     val greeting: String = "Selamat datang",
     val activeSource: AudioSourceType = AudioSourceType.STREAMING,
     val mixHero: Playlist? = null,
+    val artistSpotlight: HomeHeroPage? = null,
     val shelves: List<Playlist> = emptyList(),
     val isLoading: Boolean = true,
     val errorMessage: String? = null,
@@ -83,6 +137,7 @@ data class HomeUiState(
 @HiltViewModel
 class HomeViewModel @Inject constructor(
     private val musicSource: MusicSource,
+    private val artistRepository: ArtistRepository,
     private val preferencesRepository: PreferencesRepository,
     private val localLibraryRepository: LocalLibraryRepository,
 ) : ViewModel() {
@@ -131,6 +186,7 @@ class HomeViewModel @Inject constructor(
     private fun loadShelves(seedIds: Set<String>, source: AudioSourceType, seed: Int) {
         viewModelScope.launch {
             _uiState.update { it.copy(isLoading = true, activeSource = source, errorMessage = null) }
+            val favoriteArtists = artistRepository.getArtistsByIds(seedIds).getOrDefault(emptyList())
             musicSource.getHomeRecommendations(seedIds, source)
                 .onSuccess { raw ->
                     val rawHero = raw.firstOrNull { it.id == "shelf_mix_mupa" }
@@ -140,17 +196,25 @@ class HomeViewModel @Inject constructor(
                     } else {
                         rawHero
                     }
-                    // Hapus shelf Mix Mupa ganda dari daftar shelf (perbaikan B3)
+                    // Maksimal 3 shelf di bawah Hero, tanpa duplikasi Mix Mupa
                     val nonHeroShelves = raw
                         .filterNot { it.id == "shelf_mix_mupa" }
                         .filter { it.tracks.isNotEmpty() }
                         .take(3)
+
+                    val allPool = buildList {
+                        adjustedHero?.tracks?.let { addAll(it) }
+                        nonHeroShelves.forEach { addAll(it.tracks) }
+                    }.distinctBy { it.id }
+
+                    val spotlight = buildDailyArtistSpotlight(favoriteArtists, allPool)
 
                     _uiState.update {
                         it.copy(
                             greeting = computeGreeting(),
                             activeSource = source,
                             mixHero = adjustedHero,
+                            artistSpotlight = spotlight,
                             shelves = nonHeroShelves,
                             isLoading = false,
                             errorMessage = null,
@@ -169,6 +233,30 @@ class HomeViewModel @Inject constructor(
         }
     }
 
+    private fun buildDailyArtistSpotlight(
+        favoriteArtists: List<Artist>,
+        pool: List<Track>,
+    ): HomeHeroPage? {
+        if (favoriteArtists.isEmpty() || pool.isEmpty()) return null
+        val dayOfYear = Calendar.getInstance().get(Calendar.DAY_OF_YEAR)
+        val spotlightArtist = favoriteArtists[dayOfYear % favoriteArtists.size]
+        val matchingTracks = pool.filter {
+            it.artistName.contains(spotlightArtist.name, ignoreCase = true)
+        }
+        val tracks = matchingTracks.ifEmpty { pool.take(8) }
+        if (tracks.isEmpty()) return null
+        return HomeHeroPage(
+            id = "hero_artist_${spotlightArtist.id}",
+            kind = HomeHeroKind.ARTIST_SPOTLIGHT,
+            kicker = "SOROTAN ARTIS",
+            title = spotlightArtist.name,
+            subtitle = "${tracks.size} lagu pilihan · Bergilir harian dari artis favoritmu",
+            artworkUrl = spotlightArtist.artworkUrl ?: tracks.firstOrNull()?.artworkUrl,
+            tracks = tracks,
+            canReshuffle = false,
+        )
+    }
+
     private fun computeGreeting(): String {
         val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
         return when (hour) {
@@ -180,6 +268,13 @@ class HomeViewModel @Inject constructor(
     }
 }
 
+/**
+ * Layar Beranda Mupa (Fase 2S — C):
+ * - Hero edge-to-edge di bagian atas (~54% tinggi layar, maks 440dp) menjangkau tepi atas di bawah status bar.
+ * - Carousel manual (tanpa auto-advance) hingga 3 halaman: Mix Mupa, Sorotan Artis (bergilir harian), Lanjutkan.
+ * - Warna Ultra Dynamic berpindah mulus mengikuti halaman aktif; parallax 0,5x di graphicsLayer.
+ * - Maksimal 3 shelf di bawah Hero dengan lagu unik per layar.
+ */
 @Composable
 fun HomeScreen(
     uiState: HomeUiState,
@@ -191,79 +286,93 @@ fun HomeScreen(
     onImportLocalFiles: () -> Unit = {},
     onImportLocalFolder: () -> Unit = {},
     onToggleSource: ((AudioSourceType) -> Unit)? = null,
+    continueTrack: Track? = null,
+    continueQueue: List<Track> = emptyList(),
+    continueIndex: Int = 0,
+    pagePalettes: Map<String, UltraDynamicPalette> = emptyMap(),
     modifier: Modifier = Modifier,
 ) {
+    val topInset = contentPadding.calculateTopPadding()
+    val bottomInset = contentPadding.calculateBottomPadding()
+    val listState = rememberLazyListState()
+
+    val heroPages = remember(uiState.mixHero, uiState.artistSpotlight, continueTrack, continueQueue, continueIndex, stripArtistName) {
+        buildList {
+            uiState.mixHero?.takeIf { it.tracks.isNotEmpty() }?.let { mix ->
+                add(
+                    HomeHeroPage(
+                        id = "hero_mix_mupa",
+                        kind = HomeHeroKind.MIX_MUPA,
+                        kicker = "MIX MUPA",
+                        title = mix.title,
+                        subtitle = "${mix.tracks.size} lagu · ${mix.subtitle.orEmpty().ifBlank { "Racikan harian untukmu" }}",
+                        artworkUrl = mix.tracks.firstOrNull()?.artworkUrl,
+                        tracks = mix.tracks,
+                        initialTrackIndex = 0,
+                        canReshuffle = true,
+                    ),
+                )
+            }
+            uiState.artistSpotlight?.takeIf { it.tracks.isNotEmpty() }?.let { spotlight ->
+                add(spotlight)
+            }
+            if (continueTrack != null) {
+                val display = TrackDisplayRules.formatTrack(continueTrack, stripArtistName)
+                val queueToPlay = continueQueue.ifEmpty { listOf(continueTrack) }
+                val safeIdx = continueIndex.coerceIn(0, (queueToPlay.size - 1).coerceAtLeast(0))
+                add(
+                    HomeHeroPage(
+                        id = "hero_continue_${continueTrack.id}",
+                        kind = HomeHeroKind.CONTINUE_LISTENING,
+                        kicker = "LANJUTKAN",
+                        title = display.title,
+                        subtitle = "Lanjutkan mendengarkan · ${display.subtitle}",
+                        artworkUrl = continueTrack.artworkUrl,
+                        tracks = queueToPlay,
+                        initialTrackIndex = safeIdx,
+                        canReshuffle = false,
+                    ),
+                )
+            }
+        }.take(3)
+    }
+
+    val screenHeightDp = LocalConfiguration.current.screenHeightDp.dp
+    val heroHeight = (screenHeightDp * 0.54f).coerceIn(340.dp, 440.dp)
+
+    val hasContent = heroPages.isNotEmpty() || uiState.shelves.isNotEmpty()
+
     LazyColumn(
+        state = listState,
         modifier = modifier.fillMaxSize(),
-        contentPadding = contentPadding,
+        contentPadding = PaddingValues(top = 0.dp, bottom = bottomInset),
         verticalArrangement = Arrangement.spacedBy(MupaSpacing.SectionGap),
     ) {
-        // Header: glyph + sapaan (wordmark tidak dobel) + indikator sumber tenang
-        item(key = "home_header") {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    modifier = Modifier.weight(1f),
-                ) {
-                    MupaLogoGlyph(size = 26.dp)
-                    Text(
-                        text = uiState.greeting,
-                        style = MaterialTheme.typography.headlineLarge,
-                        color = MaterialTheme.colorScheme.onBackground,
-                        maxLines = 1,
-                    )
-                }
-                val nextSource = if (uiState.activeSource == AudioSourceType.STREAMING) {
-                    AudioSourceType.LOCAL
-                } else {
-                    AudioSourceType.STREAMING
-                }
-                Row(
-                    modifier = Modifier
-                        .clip(CircleShape)
-                        .background(MaterialTheme.colorScheme.surfaceContainer)
-                        .border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape)
-                        .clickable(enabled = onToggleSource != null) { onToggleSource?.invoke(nextSource) }
-                        .padding(horizontal = 10.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(5.dp),
-                ) {
-                    Icon(
-                        imageVector = if (uiState.activeSource == AudioSourceType.STREAMING) {
-                            Icons.Rounded.Cloud
-                        } else {
-                            Icons.Rounded.Smartphone
-                        },
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(15.dp),
-                    )
-                    Text(
-                        text = if (uiState.activeSource == AudioSourceType.STREAMING) "Awan" else "Lokal",
-                        style = MaterialTheme.typography.labelMedium,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            }
-        }
-
         when {
-            uiState.isLoading && uiState.mixHero == null && uiState.shelves.isEmpty() -> {
+            uiState.isLoading && !hasContent -> {
                 item(key = "home_loading_hero") {
-                    MupaSkeletonBox(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(148.dp),
-                        shape = MupaRadii.Card,
-                    )
+                    Column {
+                        HomeFallbackTopBar(
+                            greeting = uiState.greeting,
+                            activeSource = uiState.activeSource,
+                            topInset = topInset,
+                            onSwitchSource = onToggleSource,
+                        )
+                        Spacer(modifier = Modifier.height(16.dp))
+                        MupaSkeletonBox(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = MupaSpacing.ScreenHorizontal)
+                                .height(260.dp),
+                            shape = MupaRadii.Card,
+                        )
+                    }
                 }
                 item(key = "home_loading_shelf") {
-                    Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                    Column(
+                        modifier = Modifier.padding(horizontal = MupaSpacing.ScreenHorizontal),
+                        verticalArrangement = Arrangement.spacedBy(14.dp),
+                    ) {
                         MupaSkeletonBox(modifier = Modifier.width(120.dp).height(20.dp), shape = CircleShape)
                         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             repeat(3) { MupaCoverCardSkeleton() }
@@ -272,57 +381,102 @@ fun HomeScreen(
                 }
             }
 
-            uiState.errorMessage != null && uiState.mixHero == null && uiState.shelves.isEmpty() -> {
+            uiState.errorMessage != null && !hasContent -> {
+                item(key = "home_error_top") {
+                    HomeFallbackTopBar(
+                        greeting = uiState.greeting,
+                        activeSource = uiState.activeSource,
+                        topInset = topInset,
+                        onSwitchSource = onToggleSource,
+                    )
+                }
                 item(key = "home_error") {
-                    MupaErrorState(message = uiState.errorMessage, onRetry = onRetry)
+                    MupaErrorState(
+                        message = uiState.errorMessage,
+                        onRetry = onRetry,
+                        modifier = Modifier.padding(horizontal = MupaSpacing.ScreenHorizontal),
+                    )
                 }
             }
 
-            uiState.mixHero == null && uiState.shelves.isEmpty() -> {
+            !hasContent -> {
+                item(key = "home_empty_top") {
+                    HomeFallbackTopBar(
+                        greeting = uiState.greeting,
+                        activeSource = uiState.activeSource,
+                        topInset = topInset,
+                        onSwitchSource = onToggleSource,
+                    )
+                }
                 item(key = "home_empty") {
-                    if (uiState.activeSource == AudioSourceType.LOCAL) {
-                        MupaEmptyState(
-                            icon = Icons.Rounded.LibraryMusic,
-                            title = "Pustaka lokal masih kosong",
-                            subtitle = "Import file audio atau folder musik dari perangkatmu untuk mulai meracik Mix Mupa offline.",
-                            actionLabel = "Import Lagu",
-                            onAction = onImportLocalFiles,
-                            secondaryActionLabel = "Import Folder",
-                            onSecondaryAction = onImportLocalFolder,
-                        )
-                    } else {
-                        MupaEmptyState(
-                            icon = Icons.Rounded.Cloud,
-                            title = "Belum ada rekomendasi",
-                            subtitle = "Periksa koneksi internetmu atau muat ulang Beranda.",
-                            actionLabel = "Coba lagi",
-                            onAction = onRetry,
-                        )
+                    Box(modifier = Modifier.padding(horizontal = MupaSpacing.ScreenHorizontal)) {
+                        if (uiState.activeSource == AudioSourceType.LOCAL) {
+                            MupaEmptyState(
+                                icon = Icons.Rounded.LibraryMusic,
+                                title = "Pustaka lokal masih kosong",
+                                subtitle = "Import file audio atau folder musik dari perangkatmu untuk mulai meracik Mix Mupa offline.",
+                                actionLabel = "Import Lagu",
+                                onAction = onImportLocalFiles,
+                                secondaryActionLabel = "Import Folder",
+                                onSecondaryAction = onImportLocalFolder,
+                            )
+                        } else {
+                            MupaEmptyState(
+                                icon = Icons.Rounded.Cloud,
+                                title = "Belum ada rekomendasi",
+                                subtitle = "Periksa koneksi internetmu atau muat ulang Beranda.",
+                                actionLabel = "Coba lagi",
+                                onAction = onRetry,
+                            )
+                        }
                     }
                 }
             }
 
             else -> {
-                // SATU kartu hero Mix Mupa (kolase cover, judul, N lagu, tombol Putar koral, ikon Racik ulang)
-                uiState.mixHero?.takeIf { it.tracks.isNotEmpty() }?.let { hero ->
-                    item(key = "hero_mix_mupa") {
-                        MixMupaHeroCard(
-                            playlist = hero,
-                            onPlay = { onPlayTrack(hero.tracks, 0) },
-                            onReshuffle = onReshuffleMix,
+                if (heroPages.isNotEmpty()) {
+                    item(key = "home_hero_carousel") {
+                        HomeEdgeToEdgeHeroCarousel(
+                            pages = heroPages,
+                            greeting = uiState.greeting,
+                            activeSource = uiState.activeSource,
+                            heroHeight = heroHeight,
+                            topInset = topInset,
+                            scrollOffsetProvider = {
+                                if (listState.firstVisibleItemIndex == 0) {
+                                    listState.firstVisibleItemScrollOffset.toFloat()
+                                } else {
+                                    0f
+                                }
+                            },
+                            pagePalettes = pagePalettes,
+                            onSwitchSource = onToggleSource,
+                            onPlayPage = { page -> onPlayTrack(page.tracks, page.initialTrackIndex) },
+                            onReshuffleMix = onReshuffleMix,
+                        )
+                    }
+                } else {
+                    item(key = "home_header_fallback") {
+                        HomeFallbackTopBar(
+                            greeting = uiState.greeting,
+                            activeSource = uiState.activeSource,
+                            topInset = topInset,
+                            onSwitchSource = onToggleSource,
                         )
                     }
                 }
 
-                // Maksimal 3 shelf tanpa duplikasi (Untukmu, Ulangi lagi, Belum diputar)
-                uiState.shelves.forEach { shelf ->
+                // Maksimal 3 shelf tanpa duplikasi di bawah Hero
+                uiState.shelves.take(3).forEach { shelf ->
                     item(key = shelf.id) {
                         Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
                             MupaSectionHeader(
                                 title = shelf.title,
                                 subtitle = shelf.subtitle,
+                                modifier = Modifier.padding(horizontal = MupaSpacing.ScreenHorizontal),
                             )
                             LazyRow(
+                                contentPadding = PaddingValues(horizontal = MupaSpacing.ScreenHorizontal),
                                 horizontalArrangement = Arrangement.spacedBy(14.dp),
                             ) {
                                 itemsIndexed(
@@ -347,91 +501,318 @@ fun HomeScreen(
 }
 
 @Composable
-private fun MixMupaHeroCard(
-    playlist: Playlist,
-    onPlay: () -> Unit,
-    onReshuffle: () -> Unit,
+private fun HomeFallbackTopBar(
+    greeting: String,
+    activeSource: AudioSourceType,
+    topInset: Dp,
+    onSwitchSource: ((AudioSourceType) -> Unit)?,
 ) {
-    Column(
+    Row(
         modifier = Modifier
             .fillMaxWidth()
-            .clip(MupaRadii.Card)
-            .background(MaterialTheme.colorScheme.surfaceContainer)
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, MupaRadii.Card)
-            .padding(18.dp),
-        verticalArrangement = Arrangement.spacedBy(16.dp),
+            .padding(
+                start = MupaSpacing.ScreenHorizontal,
+                end = MupaSpacing.ScreenHorizontal,
+                top = topInset + 12.dp,
+            ),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween,
     ) {
         Row(
-            modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            modifier = Modifier.weight(1f),
         ) {
-            // Kolase 2x2 sampul
-            MixCoverCollage(
-                artworkUrls = playlist.tracks.map { it.artworkUrl }.take(4),
+            MupaLogoGlyph(size = 26.dp)
+            Text(
+                text = greeting,
+                style = MaterialTheme.typography.headlineLarge,
+                color = MaterialTheme.colorScheme.onBackground,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
             )
-            Column(
-                modifier = Modifier.weight(1f),
-                verticalArrangement = Arrangement.spacedBy(3.dp),
-            ) {
-                Text(
-                    text = "Mix Mupa",
-                    style = MaterialTheme.typography.titleLarge,
-                    color = MaterialTheme.colorScheme.onSurface,
-                )
-                Text(
-                    text = "${playlist.tracks.size} lagu · ${playlist.subtitle.orEmpty()}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
-                )
-            }
-            IconButton(
-                onClick = onReshuffle,
-                modifier = Modifier.size(48.dp),
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.Refresh,
-                    contentDescription = "Racik ulang Mix Mupa",
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(22.dp),
-                )
-            }
         }
-
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-        ) {
-            MupaPrimaryButton(
-                text = "Putar",
-                icon = Icons.Rounded.PlayArrow,
-                onClick = onPlay,
-            )
-            Spacer(modifier = Modifier.weight(1f))
-        }
+        MupaSourceSwitch(
+            activeSource = activeSource,
+            onSwitch = { onSwitchSource?.invoke(it) },
+        )
     }
 }
 
 @Composable
-private fun MixCoverCollage(
-    artworkUrls: List<String?>,
-    modifier: Modifier = Modifier,
+private fun HomeEdgeToEdgeHeroCarousel(
+    pages: List<HomeHeroPage>,
+    greeting: String,
+    activeSource: AudioSourceType,
+    heroHeight: Dp,
+    topInset: Dp,
+    scrollOffsetProvider: () -> Float,
+    pagePalettes: Map<String, UltraDynamicPalette>,
+    onSwitchSource: ((AudioSourceType) -> Unit)?,
+    onPlayPage: (HomeHeroPage) -> Unit,
+    onReshuffleMix: () -> Unit,
 ) {
-    val padded = List(4) { idx -> artworkUrls.getOrNull(idx) }
-    Column(
-        modifier = modifier
-            .size(68.dp)
-            .clip(RoundedCornerShape(14.dp)),
-        verticalArrangement = Arrangement.spacedBy(2.dp),
-    ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-            MupaArtworkBox(artworkUrl = padded[0], contentDescription = null, size = 33.dp, shape = RoundedCornerShape(4.dp), iconSize = 14.dp)
-            MupaArtworkBox(artworkUrl = padded[1], contentDescription = null, size = 33.dp, shape = RoundedCornerShape(4.dp), iconSize = 14.dp)
+    val context = LocalContext.current
+    val appearance = LocalMupaAppearance.current
+    val bgColor = MaterialTheme.colorScheme.background
+    val pagerState = rememberPagerState(pageCount = { pages.size })
+    val extractedPalettes = remember { mutableStateMapOf<String, UltraDynamicPalette>() }
+
+    // Ekstraksi palet Ultra Dynamic asinkron per halaman Hero di background thread (di-cache via LRU 64)
+    LaunchedEffect(pages) {
+        val loader = ImageLoader(context)
+        pages.forEach { page ->
+            if (page.palette != null || pagePalettes.containsKey(page.id) || extractedPalettes.containsKey(page.id)) {
+                return@forEach
+            }
+            val art = page.artworkUrl
+            if (art.isNullOrBlank()) {
+                extractedPalettes[page.id] = UltraDynamicPalette.BrandNoCover
+            } else {
+                val palette = withContext(Dispatchers.IO) {
+                    val dataModel: Any = if (art.startsWith("/")) File(art) else art
+                    val req = ImageRequest.Builder(context)
+                        .data(dataModel)
+                        .size(128)
+                        .allowHardware(false)
+                        .build()
+                    val result = runCatching { loader.execute(req) }.getOrNull()
+                    val bmp: Bitmap? = (result as? SuccessResult)?.image?.toBitmap()
+                    UltraDynamicPaletteCache.extractOrGet(
+                        key = "hero_${page.id}_$art",
+                        bitmap = bmp,
+                    )
+                }
+                extractedPalettes[page.id] = palette
+            }
         }
-        Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-            MupaArtworkBox(artworkUrl = padded[2], contentDescription = null, size = 33.dp, shape = RoundedCornerShape(4.dp), iconSize = 14.dp)
-            MupaArtworkBox(artworkUrl = padded[3], contentDescription = null, size = 33.dp, shape = RoundedCornerShape(4.dp), iconSize = 14.dp)
+    }
+
+    val currentPageIndex = pagerState.currentPage.coerceIn(0, (pages.size - 1).coerceAtLeast(0))
+    val activePage = pages[currentPageIndex]
+    val activeHeroPalette = activePage.palette
+        ?: pagePalettes[activePage.id]
+        ?: extractedPalettes[activePage.id]
+        ?: appearance.effectiveUltraDynamicPalette
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(heroHeight)
+            .clipToBounds()
+            .testTag("mupa_home_hero"),
+    ) {
+        // HorizontalPager manual (tanpa auto-advance)
+        HorizontalPager(
+            state = pagerState,
+            modifier = Modifier
+                .fillMaxSize()
+                .testTag("mupa_home_hero_pager"),
+        ) { pageIdx ->
+            val page = pages[pageIdx]
+            val pagePalette = page.palette
+                ?: pagePalettes[page.id]
+                ?: extractedPalettes[page.id]
+                ?: activeHeroPalette
+
+            Box(modifier = Modifier.fillMaxSize()) {
+                // Latar cover (>= 512px) dengan parallax halus 0,5x di fase graphicsLayer
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            translationY = scrollOffsetProvider() * 0.5f
+                        }
+                        .background(
+                            if (appearance.isOledMode) Color.Black else pagePalette.bgDeep,
+                        ),
+                ) {
+                    if (!page.artworkUrl.isNullOrBlank()) {
+                        val dataModel: Any = if (page.artworkUrl.startsWith("/")) File(page.artworkUrl) else page.artworkUrl
+                        AsyncImage(
+                            model = ImageRequest.Builder(context)
+                                .data(dataModel)
+                                .size(640)
+                                .crossfade(220)
+                                .build(),
+                            contentDescription = page.title,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize(),
+                        )
+                    } else {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Icon(
+                                imageVector = Icons.Rounded.MusicNote,
+                                contentDescription = null,
+                                tint = MupaPalette.TextPrimary.copy(alpha = 0.14f),
+                                modifier = Modifier.size(96.dp),
+                            )
+                        }
+                    }
+                }
+
+                // Glow Ultra Dynamic aktif menyatu dengan sampul (berpindah mulus 600ms antar halaman)
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer { alpha = if (appearance.isOledMode) 0f else 0.52f },
+                ) {
+                    UltraDynamicBackground(
+                        palette = activeHeroPalette,
+                        headerOnly = true,
+                    )
+                }
+
+                // Scrim status bar di atas + gradasi lembut ke warna latar di bawah
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(
+                            Brush.verticalGradient(
+                                0.0f to Color.Black.copy(alpha = 0.62f),
+                                0.22f to Color.Black.copy(alpha = 0.24f),
+                                0.52f to bgColor.copy(alpha = 0.44f),
+                                0.82f to bgColor.copy(alpha = 0.90f),
+                                1.0f to bgColor,
+                            ),
+                        ),
+                )
+
+                // Konten kiri-bawah Hero: sapaan, kicker berjarak, judul 32/36 Bold, subjudul 14, Putar + Racik ulang
+                Column(
+                    modifier = Modifier
+                        .align(Alignment.BottomStart)
+                        .fillMaxWidth()
+                        .padding(
+                            start = MupaSpacing.ScreenHorizontal,
+                            end = MupaSpacing.ScreenHorizontal,
+                            bottom = 20.dp,
+                        ),
+                    verticalArrangement = Arrangement.spacedBy(6.dp),
+                ) {
+                    Text(
+                        text = greeting,
+                        style = MaterialTheme.typography.labelLarge,
+                        color = MupaPalette.TextPrimary.copy(alpha = 0.78f),
+                        maxLines = 1,
+                    )
+                    Text(
+                        text = page.kicker,
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            letterSpacing = 1.6.sp,
+                            fontWeight = FontWeight.Bold,
+                        ),
+                        color = if (appearance.isOledMode) MupaPalette.CoralPrimary else activeHeroPalette.onAccent,
+                        maxLines = 1,
+                    )
+                    Text(
+                        text = page.title,
+                        style = MaterialTheme.typography.displaySmall.copy(
+                            fontSize = 32.sp,
+                            lineHeight = 36.sp,
+                            fontWeight = FontWeight.Bold,
+                        ),
+                        color = MupaPalette.TextPrimary,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        text = page.subtitle,
+                        style = MaterialTheme.typography.bodyMedium.copy(fontSize = 14.sp),
+                        color = MupaPalette.TextSecondary,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+
+                    Spacer(modifier = Modifier.height(6.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        ) {
+                            MupaPrimaryButton(
+                                text = "Putar",
+                                icon = Icons.Rounded.PlayArrow,
+                                onClick = { onPlayPage(page) },
+                            )
+                            if (page.canReshuffle) {
+                                IconButton(
+                                    onClick = onReshuffleMix,
+                                    modifier = Modifier
+                                        .size(48.dp)
+                                        .clip(CircleShape)
+                                        .background(MupaPalette.Background.copy(alpha = 0.65f))
+                                        .border(1.dp, Color.White.copy(alpha = 0.16f), CircleShape),
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Rounded.Refresh,
+                                        contentDescription = "Racik ulang Mix Mupa",
+                                        tint = MupaPalette.TextPrimary,
+                                        modifier = Modifier.size(22.dp),
+                                    )
+                                }
+                            }
+                        }
+
+                        // Spacer kanan untuk titik paginasi yang melayang di sudut kanan-bawah
+                        Spacer(modifier = Modifier.width(56.dp))
+                    }
+                }
+            }
+        }
+
+        // Bar atas tetap di dalam Hero: logo glyph kiri-atas + MupaSourceSwitch kanan-atas
+        Row(
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .fillMaxWidth()
+                .padding(
+                    start = MupaSpacing.ScreenHorizontal,
+                    end = MupaSpacing.ScreenHorizontal,
+                    top = topInset + 12.dp,
+                ),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            MupaLogoGlyph(size = 28.dp)
+            MupaSourceSwitch(
+                activeSource = activeSource,
+                onSwitch = { onSwitchSource?.invoke(it) },
+                onDarkOverlay = true,
+            )
+        }
+
+        // Titik paginasi kanan-bawah (hanya saat > 1 halaman)
+        if (pages.size > 1) {
+            Row(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(end = MupaSpacing.ScreenHorizontal, bottom = 32.dp)
+                    .testTag("mupa_hero_dots"),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                pages.forEachIndexed { idx, _ ->
+                    val active = idx == currentPageIndex
+                    Box(
+                        modifier = Modifier
+                            .height(6.dp)
+                            .width(if (active) 20.dp else 6.dp)
+                            .clip(CircleShape)
+                            .background(
+                                if (active) MupaPalette.CoralPrimary else MupaPalette.TextPrimary.copy(alpha = 0.35f),
+                            ),
+                    )
+                }
+            }
         }
     }
 }

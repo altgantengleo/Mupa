@@ -23,6 +23,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -187,6 +188,9 @@ fun MupaApp(
                     onPerformanceModeChange = onPerformanceModeChange,
                     onStripArtistNameChange = onStripArtistNameChange,
                     onEditFavoriteArtists = onOpenEditFavoriteArtists,
+                    continueTrack = playerState.currentTrack,
+                    continueQueue = playerState.queue,
+                    continueIndex = playerState.currentIndex,
                     modifier = Modifier
                         .fillMaxSize()
                         .graphicsLayer {
@@ -196,6 +200,28 @@ fun MupaApp(
                             scaleY = scale
                         },
                 )
+
+                // Scrim status bar global agar konten scroll di Cari/Pustaka/Akun/Pengaturan tidak terpotong di bawah jam (N3)
+                if (currentRoute != MupaTopLevelDestination.HOME.route) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .fillMaxWidth()
+                            .height(statusBarTop + 18.dp)
+                            .testTag("mupa_top_status_scrim")
+                            .graphicsLayer {
+                                val p = playerSheetState.progress
+                                alpha = (1f - p / 0.30f).coerceIn(0f, 1f)
+                            }
+                            .background(
+                                Brush.verticalGradient(
+                                    0.0f to bgColor.copy(alpha = 0.98f),
+                                    0.55f to bgColor.copy(alpha = 0.80f),
+                                    1.0f to Color.Transparent,
+                                ),
+                            ),
+                    )
+                }
             }
 
             // Scrim gradasi bawah tepat di atas chrome melayang (latar transparan -> latar 95%) — perbaikan B1

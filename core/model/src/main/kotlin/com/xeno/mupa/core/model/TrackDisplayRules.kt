@@ -127,8 +127,64 @@ object TrackDisplayRules {
 }
 
 /**
- * Menyusun rak Beranda agar setiap lagu hanya muncul sekali per layar (distinctBy id)
- * dan setiap shelf dibatasi maksimal 10 item (perbaikan B3).
+ * Filter kualitas rekomendasi Beranda (perbaikan N4):
+ * - Memprioritaskan lagu tunggal berkualitas dan menolak kompilasi/upload sampah
+ *   ("top hits", "playlist", "full album", "mix", "nonstop", "1 hour/jam", dll.).
+ * - Menolak durasi > 8 menit atau < 60 detik bila durasi diketahui (> 0 ms).
+ * - Deduplikasi berdasarkan ID maupun kunci (judul dinormalisasi + artis).
+ */
+object RecommendationQualityFilter {
+    const val MIN_DURATION_MS: Long = 60_000L
+    const val MAX_DURATION_MS: Long = 480_000L
+
+    private val junkTitleRegex = Regex(
+        """(?i)(?:top\s*hits|playlist|full\s*album|\bmix\b|megamix|non\s*-?\s*stop|\b\d+\s*(?:hour|hours|hr|jam)\b|compilation|kompilasi|kumpulan\s+lagu|terbaik\s+sepanjang\s+masa|lagu\s+hits\s+\d{4}|tik\s*tok|dj\s+remix|jedag\s+jedug|sped\s+up|slowed\s*\+?\s*reverb|mashup\s+nonstop)""",
+    )
+    private val junkArtistRegex = Regex(
+        """(?i)(?:top\s*hits|spotify|playlist|compilation|kompilasi|piktor\s*tv|music\s*tv|non\s*-?\s*stop)""",
+    )
+    private val nonAlphaNumRegex = Regex("""[^\p{L}\p{N}]+""")
+
+    fun isHighQualitySong(track: Track): Boolean {
+        val title = track.title.trim()
+        if (title.isEmpty()) return false
+        if (junkTitleRegex.containsMatchIn(title)) return false
+        val artist = track.artistName.trim()
+        if (artist.isNotEmpty() && junkArtistRegex.containsMatchIn(artist)) return false
+        if (track.durationMs > 0L && (track.durationMs < MIN_DURATION_MS || track.durationMs > MAX_DURATION_MS)) {
+            return false
+        }
+        return true
+    }
+
+    fun normalizedDedupKey(track: Track): String {
+        val cleanedTitle = TrackDisplayRules.cleanTitleForLyrics(track.title)
+            .lowercase()
+            .let { nonAlphaNumRegex.replace(it, " ").trim() }
+        val cleanedArtist = track.artistName
+            .lowercase()
+            .let { nonAlphaNumRegex.replace(it, " ").trim() }
+        return "$cleanedTitle|$cleanedArtist"
+    }
+
+    fun filterTracks(tracks: List<Track>): List<Track> {
+        val seenIds = HashSet<String>(tracks.size)
+        val seenKeys = HashSet<String>(tracks.size)
+        val out = ArrayList<Track>(tracks.size)
+        for (track in tracks) {
+            if (!isHighQualitySong(track)) continue
+            val key = normalizedDedupKey(track)
+            if (seenIds.add(track.id) && seenKeys.add(key)) {
+                out.add(track)
+            }
+        }
+        return out
+    }
+}
+
+/**
+ * Menyusun rak Beranda agar setiap lagu hanya muncul sekali per layar (distinctBy id & judul dinormalisasi)
+ * dan setiap shelf dibatasi maksimal 10 item (perbaikan B3 & N4).
  */
 object ShelfComposer {
     const val DEFAULT_MAX_ITEMS_PER_SHELF = 10
@@ -140,13 +196,15 @@ object ShelfComposer {
         maxShelves: Int = 3,
     ): List<Playlist> {
         val seenIds = excludedTrackIds.toMutableSet()
+        val seenKeys = mutableSetOf<String>()
         val result = mutableListOf<Playlist>()
         for (shelf in shelves) {
             if (result.size >= maxShelves) break
             val unique = mutableListOf<Track>()
             for (track in shelf.tracks) {
                 if (unique.size >= maxPerShelf) break
-                if (seenIds.add(track.id)) {
+                val key = RecommendationQualityFilter.normalizedDedupKey(track)
+                if (seenIds.add(track.id) && seenKeys.add(key)) {
                     unique.add(track)
                 }
             }

@@ -2,7 +2,6 @@ package com.xeno.mupa.ui.screens
 
 import android.net.Uri
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.animateColorAsState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -28,14 +27,12 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
 import androidx.compose.material.icons.rounded.Add
-import androidx.compose.material.icons.rounded.Cloud
 import androidx.compose.material.icons.rounded.CreateNewFolder
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Favorite
 import androidx.compose.material.icons.rounded.FileUpload
 import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.Refresh
-import androidx.compose.material.icons.rounded.Smartphone
 import androidx.compose.material.icons.rounded.Tune
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
@@ -57,10 +54,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.selected
-import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -72,10 +65,10 @@ import com.xeno.mupa.core.designsystem.component.MupaErrorState
 import com.xeno.mupa.core.designsystem.component.MupaFilterSheet
 import com.xeno.mupa.core.designsystem.component.MupaPrimaryButton
 import com.xeno.mupa.core.designsystem.component.MupaSecondaryButton
+import com.xeno.mupa.core.designsystem.component.MupaSourceSwitch
 import com.xeno.mupa.core.designsystem.component.MupaTextButton
 import com.xeno.mupa.core.designsystem.component.MupaTrackRow
 import com.xeno.mupa.core.designsystem.component.MupaTrackRowSkeleton
-import com.xeno.mupa.core.designsystem.theme.MupaMotion
 import com.xeno.mupa.core.designsystem.theme.MupaPalette
 import com.xeno.mupa.core.designsystem.theme.MupaRadii
 import com.xeno.mupa.core.designsystem.theme.MupaSpacing
@@ -398,7 +391,7 @@ fun LibraryScreen(
                     style = MaterialTheme.typography.headlineLarge,
                     color = MaterialTheme.colorScheme.onBackground,
                 )
-                SourceModeSwitch(
+                MupaSourceSwitch(
                     activeSource = uiState.activeSource,
                     onSwitch = onSwitchSource,
                 )
@@ -593,59 +586,6 @@ fun LibraryScreen(
                         }
                     }
                 }
-            }
-        }
-    }
-}
-
-@Composable
-private fun SourceModeSwitch(
-    activeSource: AudioSourceType,
-    onSwitch: (AudioSourceType) -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .clip(CircleShape)
-            .background(MaterialTheme.colorScheme.surfaceContainer)
-            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape)
-            .padding(3.dp),
-        horizontalArrangement = Arrangement.spacedBy(2.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        val options = listOf(
-            AudioSourceType.STREAMING to Pair(Icons.Rounded.Cloud, "Mode Streaming (Awan)"),
-            AudioSourceType.LOCAL to Pair(Icons.Rounded.Smartphone, "Mode Lokal (Ponsel)"),
-        )
-        options.forEach { (source, pair) ->
-            val isSelected = activeSource == source
-            val bg by animateColorAsState(
-                targetValue = if (isSelected) MupaPalette.CoralPrimary else Color.Transparent,
-                animationSpec = MupaMotion.standardTween(MupaMotion.DurationShortMs),
-                label = "srcSwitchBg_${source.name}",
-            )
-            val tint by animateColorAsState(
-                targetValue = if (isSelected) MupaPalette.LogoCharcoal else MaterialTheme.colorScheme.onSurfaceVariant,
-                animationSpec = MupaMotion.standardTween(MupaMotion.DurationShortMs),
-                label = "srcSwitchTint_${source.name}",
-            )
-            Box(
-                modifier = Modifier
-                    .size(width = 44.dp, height = 36.dp)
-                    .clip(CircleShape)
-                    .background(bg)
-                    .semantics {
-                        selected = isSelected
-                        contentDescription = pair.second
-                    }
-                    .clickable(role = Role.Tab) { onSwitch(source) },
-                contentAlignment = Alignment.Center,
-            ) {
-                Icon(
-                    imageVector = pair.first,
-                    contentDescription = null,
-                    tint = tint,
-                    modifier = Modifier.size(19.dp),
-                )
             }
         }
     }

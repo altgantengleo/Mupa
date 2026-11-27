@@ -56,6 +56,9 @@ fun MupaNavHost(
     onPerformanceModeChange: (Boolean) -> Unit,
     onStripArtistNameChange: (Boolean) -> Unit,
     onEditFavoriteArtists: () -> Unit,
+    continueTrack: Track? = null,
+    continueQueue: List<Track> = emptyList(),
+    continueIndex: Int = 0,
     modifier: Modifier = Modifier,
 ) {
     val tabOrder = MupaTopLevelDestination.entries.associate { it.route to it.ordinal }
@@ -126,6 +129,9 @@ fun MupaNavHost(
                 onImportLocalFiles = launchFileImport,
                 onImportLocalFolder = launchFolderImport,
                 onToggleSource = onActiveSourceChange,
+                continueTrack = continueTrack,
+                continueQueue = continueQueue,
+                continueIndex = continueIndex,
             )
         }
         composable(MupaTopLevelDestination.SEARCH.route) {
@@ -139,6 +145,7 @@ fun MupaNavHost(
                 onQueryChange = vm::onQueryChange,
                 onSelectScope = vm::onSelectScope,
                 onToggleSource = vm::onToggleSource,
+                onSwitchSource = vm::onSwitchSource,
                 onSubmitQuery = vm::onSubmitQuery,
                 onRemoveRecent = vm::onRemoveRecent,
                 onPlayTrack = onPlayTracks,

@@ -25,11 +25,9 @@ import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Close
-import androidx.compose.material.icons.rounded.Cloud
 import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.Search
-import androidx.compose.material.icons.rounded.Smartphone
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -49,9 +47,9 @@ import androidx.lifecycle.viewModelScope
 import com.xeno.mupa.core.designsystem.component.MupaChipRow
 import com.xeno.mupa.core.designsystem.component.MupaEmptyState
 import com.xeno.mupa.core.designsystem.component.MupaErrorState
-import com.xeno.mupa.core.designsystem.component.MupaFilterChip
 import com.xeno.mupa.core.designsystem.component.MupaSectionHeader
 import com.xeno.mupa.core.designsystem.component.MupaSegmentedTabs
+import com.xeno.mupa.core.designsystem.component.MupaSourceSwitch
 import com.xeno.mupa.core.designsystem.component.MupaTrackRow
 import com.xeno.mupa.core.designsystem.component.MupaTrackRowSkeleton
 import com.xeno.mupa.core.designsystem.theme.MupaPalette
@@ -150,7 +148,13 @@ class SearchViewModel @Inject constructor(
         } else {
             AudioSourceType.STREAMING
         }
+        onSwitchSource(next)
+    }
+
+    fun onSwitchSource(next: AudioSourceType) {
+        if (_uiState.value.source == next) return
         _uiState.update { it.copy(source = next, errorMessage = null) }
+        viewModelScope.launch { preferencesRepository.setActiveSource(next) }
         if (_uiState.value.query.isNotBlank() || next == AudioSourceType.LOCAL) {
             triggerSearch(_uiState.value.query, _uiState.value.activeScope, next, immediate = true)
         } else {
@@ -239,6 +243,7 @@ fun SearchScreen(
     onPlayTrack: (List<Track>, Int) -> Unit,
     onRetry: () -> Unit,
     onImportLocalFiles: () -> Unit = {},
+    onSwitchSource: ((AudioSourceType) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -246,7 +251,7 @@ fun SearchScreen(
             .fillMaxSize()
             .imePadding(),
     ) {
-        // Sticky header: judul + field pencarian + 1 baris SegmentedTabs + chip sumber (perbaikan B9)
+        // Sticky header: judul + MupaSourceSwitch kanan-atas + input pencarian + SegmentedTabs penuh tanpa terpotong (N5)
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -258,11 +263,27 @@ fun SearchScreen(
                 ),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            Text(
-                text = "Cari",
-                style = MaterialTheme.typography.headlineLarge,
-                color = MaterialTheme.colorScheme.onBackground,
-            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Text(
+                    text = "Cari",
+                    style = MaterialTheme.typography.headlineLarge,
+                    color = MaterialTheme.colorScheme.onBackground,
+                )
+                MupaSourceSwitch(
+                    activeSource = uiState.source,
+                    onSwitch = { target ->
+                        if (onSwitchSource != null) {
+                            onSwitchSource(target)
+                        } else if (target != uiState.source) {
+                            onToggleSource()
+                        }
+                    },
+                )
+            }
 
             SearchInputPill(
                 value = uiState.query,
@@ -280,16 +301,6 @@ fun SearchScreen(
                     items = SearchScope.entries.map { it.label },
                     selectedIndex = uiState.activeScope.ordinal,
                     onSelect = { idx -> onSelectScope(SearchScope.entries[idx]) },
-                )
-                MupaFilterChip(
-                    label = if (uiState.source == AudioSourceType.LOCAL) "Lokal" else "Streaming",
-                    selected = uiState.source == AudioSourceType.LOCAL,
-                    leadingIcon = if (uiState.source == AudioSourceType.LOCAL) {
-                        Icons.Rounded.Smartphone
-                    } else {
-                        Icons.Rounded.Cloud
-                    },
-                    onClick = onToggleSource,
                 )
             }
         }

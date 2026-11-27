@@ -6,6 +6,7 @@ import com.xeno.mupa.core.domain.MusicSource
 import com.xeno.mupa.core.model.Artist
 import com.xeno.mupa.core.model.AudioSourceType
 import com.xeno.mupa.core.model.Playlist
+import com.xeno.mupa.core.model.RecommendationQualityFilter
 import com.xeno.mupa.core.model.ShelfComposer
 import com.xeno.mupa.core.model.Track
 import com.xeno.mupa.data.fake.FakeArtistRepository
@@ -250,23 +251,27 @@ class StreamingMusicSource @Inject constructor(
                 listOf("Tulus", "Hindia", "Bernadya")
             }
 
-            // Ambil beberapa query berbeda agar pool cukup besar untuk 3 shelf tanpa duplikasi (B3)
+            // Ambil lagu tunggal bersih berbasis artis favorit & query khusus lagu (hindari kompilasi/Top Hits sampah — N4)
             val perArtist = seedNames.map { artistName ->
                 async {
-                    innerTubeProvider.searchTracks(artistName, limit = 8).getOrDefault(emptyList())
+                    innerTubeProvider.searchTracks("$artistName official audio", limit = 10)
+                        .getOrDefault(emptyList())
                 }
             }
             val discoveryJob = async {
-                innerTubeProvider.searchTracks("Indie Pop Santai", limit = 12).getOrDefault(emptyList())
+                innerTubeProvider.searchTracks("Indie Pop Indonesia Acoustic", limit = 14)
+                    .getOrDefault(emptyList())
             }
-            val trendingJob = async {
-                innerTubeProvider.searchTracks("Top Hits Indonesia", limit = 12).getOrDefault(emptyList())
+            val warmRepeatJob = async {
+                val anchor = seedNames.firstOrNull() ?: "Tulus"
+                innerTubeProvider.searchTracks("$anchor lagu populer", limit = 14)
+                    .getOrDefault(emptyList())
             }
 
-            val seedPool = perArtist.awaitAll().flatten().distinctBy { it.id }
-            val discoveryPool = discoveryJob.await().distinctBy { it.id }
-            val trendingPool = trendingJob.await().distinctBy { it.id }
-            val combined = (seedPool + discoveryPool + trendingPool).distinctBy { it.id }
+            val seedPool = RecommendationQualityFilter.filterTracks(perArtist.awaitAll().flatten())
+            val discoveryPool = RecommendationQualityFilter.filterTracks(discoveryJob.await())
+            val warmPool = RecommendationQualityFilter.filterTracks(warmRepeatJob.await())
+            val combined = RecommendationQualityFilter.filterTracks(seedPool + warmPool + discoveryPool)
 
             if (combined.isEmpty()) {
                 return@coroutineScope Result.failure(
@@ -304,7 +309,7 @@ class StreamingMusicSource @Inject constructor(
                     id = "shelf_repeat",
                     title = "Ulangi lagi",
                     subtitle = "Pilihan hangat yang nyaman diputar ulang",
-                    tracks = trendingPool,
+                    tracks = warmPool.ifEmpty { seedPool.drop(4) },
                     isSystemGenerated = true,
                 ),
                 Playlist(
@@ -316,7 +321,7 @@ class StreamingMusicSource @Inject constructor(
                 ),
             )
 
-            // ShelfComposer memastikan tidak ada satu pun track muncul dua kali antar shelf (maks 10/shelf)
+            // ShelfComposer memastikan tidak ada satu pun track muncul dua kali antar shelf (maks 10/shelf, maks 3 shelf)
             val dedupedShelves = ShelfComposer.compose(
                 shelves = rawShelves,
                 excludedTrackIds = emptySet(),

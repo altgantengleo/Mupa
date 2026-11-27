@@ -30,9 +30,14 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.Check
+import androidx.compose.material.icons.rounded.Cloud
 import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.MusicNote
+import androidx.compose.material.icons.rounded.Smartphone
+import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
+import com.xeno.mupa.core.model.AudioSourceType
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -395,6 +400,81 @@ fun MupaSegmentedTabs(
                     style = MaterialTheme.typography.labelLarge,
                     color = fg,
                     maxLines = 1,
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Kontrol sumber tunggal (Streaming | Lokal) untuk Beranda, Cari, dan Pustaka (perbaikan N5).
+ * Memakai state global yang sama dan posisi kanan-atas seragam di ketiga layar.
+ */
+@Composable
+fun MupaSourceSwitch(
+    activeSource: AudioSourceType,
+    onSwitch: (AudioSourceType) -> Unit,
+    modifier: Modifier = Modifier,
+    onDarkOverlay: Boolean = false,
+) {
+    val containerBg = if (onDarkOverlay) {
+        MupaPalette.Background.copy(alpha = 0.72f)
+    } else {
+        MaterialTheme.colorScheme.surfaceContainer
+    }
+    val containerBorder = if (onDarkOverlay) {
+        Color.White.copy(alpha = 0.16f)
+    } else {
+        MaterialTheme.colorScheme.outlineVariant
+    }
+
+    Row(
+        modifier = modifier
+            .testTag("mupa_source_switch")
+            .clip(CircleShape)
+            .background(containerBg)
+            .border(1.dp, containerBorder, CircleShape)
+            .padding(3.dp),
+        horizontalArrangement = Arrangement.spacedBy(2.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        val options = listOf(
+            AudioSourceType.STREAMING to Pair(Icons.Rounded.Cloud, "Mode Streaming (Awan)"),
+            AudioSourceType.LOCAL to Pair(Icons.Rounded.Smartphone, "Mode Lokal (Ponsel)"),
+        )
+        options.forEach { (source, pair) ->
+            val isSelected = activeSource == source
+            val bg by animateColorAsState(
+                targetValue = if (isSelected) MupaPalette.CoralPrimary else Color.Transparent,
+                animationSpec = MupaMotion.standardTween(MupaMotion.DurationShortMs),
+                label = "mupaSourceBg_${source.name}",
+            )
+            val tint by animateColorAsState(
+                targetValue = when {
+                    isSelected -> MupaPalette.LogoCharcoal
+                    onDarkOverlay -> MupaPalette.TextPrimary.copy(alpha = 0.78f)
+                    else -> MaterialTheme.colorScheme.onSurfaceVariant
+                },
+                animationSpec = MupaMotion.standardTween(MupaMotion.DurationShortMs),
+                label = "mupaSourceTint_${source.name}",
+            )
+            Box(
+                modifier = Modifier
+                    .size(width = 44.dp, height = 36.dp)
+                    .clip(CircleShape)
+                    .background(bg)
+                    .semantics {
+                        selected = isSelected
+                        contentDescription = pair.second
+                    }
+                    .clickable(role = Role.Tab) { onSwitch(source) },
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = pair.first,
+                    contentDescription = null,
+                    tint = tint,
+                    modifier = Modifier.size(19.dp),
                 )
             }
         }
