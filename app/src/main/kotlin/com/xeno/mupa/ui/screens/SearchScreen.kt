@@ -396,9 +396,11 @@ class SearchViewModel @Inject constructor(
                 return@launch
             }
 
-            // Streaming: pencarian kaya paralel lintas 4 provider (Deezer + iTunes + YouTube Music + Audius, hingga 60 lagu)
-            catalogAggregator.searchRich(query, trackLimit = MAX_SEARCH_TRACKS)
-                .onSuccess { bundle ->
+            // Streaming: aliran progresif lintas 4 provider (hasil tercepat langsung tampil ~250ms, lalu diperkaya hingga 60 lagu)
+            var emittedAny = false
+            catalogAggregator.observeSearchRichProgressive(query, trackLimit = MAX_SEARCH_TRACKS)
+                .collect { bundle ->
+                    emittedAny = true
                     _uiState.update {
                         it.copy(
                             results = bundle.tracks,
@@ -411,19 +413,19 @@ class SearchViewModel @Inject constructor(
                         )
                     }
                 }
-                .onFailure { err ->
-                    _uiState.update {
-                        it.copy(
-                            results = emptyList(),
-                            topArtist = null,
-                            artists = emptyList(),
-                            releases = emptyList(),
-                            isLoading = false,
-                            hasSearched = true,
-                            errorMessage = err.message ?: "Pencarian gagal. Periksa koneksi internetmu.",
-                        )
-                    }
+            if (!emittedAny) {
+                _uiState.update {
+                    it.copy(
+                        results = emptyList(),
+                        topArtist = null,
+                        artists = emptyList(),
+                        releases = emptyList(),
+                        isLoading = false,
+                        hasSearched = true,
+                        errorMessage = "Hasil tidak ditemukan untuk \"${query.trim()}\".",
+                    )
                 }
+            }
         }
     }
 
@@ -1120,8 +1122,9 @@ private fun ReleaseCardCompact(
     Column(
         modifier = Modifier
             .width(136.dp)
-            .clip(MupaRadii.ArtworkMedium)
-            .clickable(onClick = onClick),
+            .clip(RoundedCornerShape(8.dp))
+            .clickable(onClick = onClick)
+            .padding(bottom = 4.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         MupaArtworkBox(
@@ -1130,7 +1133,10 @@ private fun ReleaseCardCompact(
             size = 136.dp,
             shape = MupaRadii.ArtworkMedium,
         )
-        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Column(
+            modifier = Modifier.padding(horizontal = 2.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
+        ) {
             Text(
                 text = release.title,
                 style = MaterialTheme.typography.titleSmall,
@@ -1164,9 +1170,9 @@ private fun ArtistAvatarTile(
     Column(
         modifier = Modifier
             .width(88.dp)
-            .clip(MupaRadii.ArtworkMedium)
+            .clip(RoundedCornerShape(8.dp))
             .clickable(onClick = onClick)
-            .padding(vertical = 4.dp),
+            .padding(horizontal = 2.dp, vertical = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.spacedBy(6.dp),
     ) {

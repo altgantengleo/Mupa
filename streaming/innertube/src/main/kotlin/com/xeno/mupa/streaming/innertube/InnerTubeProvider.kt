@@ -50,6 +50,10 @@ class InnerTubeProvider(
     private val visitorCache = ConcurrentHashMap<String, CachedVisitor>()
     private val crossMatchVideoIdCache = ConcurrentHashMap<String, String>()
 
+    // Ingat profil klien tercepat yang terakhir berhasil agar lagu berikutnya tidak buang waktu coba klien gagal
+    @Volatile
+    private var preferredStreamProfileId: String? = null
+
     override suspend fun getTrendingArtists(limit: Int): Result<List<Artist>> =
         withContext(Dispatchers.IO) {
             val bodyJson = buildJsonObject {
@@ -308,7 +312,13 @@ class InnerTubeProvider(
             }
 
             var lastError: Throwable = StreamingError.Unavailable("Semua klien InnerTube gagal")
-            for (profile in InnerTubeProfiles.STREAM_WALK_ORDER) {
+            val preferredId = preferredStreamProfileId
+            val walkOrder = if (preferredId != null) {
+                InnerTubeProfiles.STREAM_WALK_ORDER.sortedByDescending { it.id == preferredId }
+            } else {
+                InnerTubeProfiles.STREAM_WALK_ORDER
+            }
+            for (profile in walkOrder) {
                 val visitorData = if (profile.ownVisitorId) getOrFetchVisitorData(profile) else null
                 val payload = buildJsonObject {
                     put("context", profile.buildContextJson(visitorData = visitorData))
@@ -330,6 +340,7 @@ class InnerTubeProvider(
                 )
                 val resolved = parsed.getOrNull()?.stream
                 if (resolved != null) {
+                    preferredStreamProfileId = profile.id
                     return@withContext Result.success(resolved)
                 }
                 val err = parsed.exceptionOrNull()

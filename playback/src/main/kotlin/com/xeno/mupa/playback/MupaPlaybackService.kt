@@ -73,8 +73,8 @@ class MupaPlaybackService : MediaLibraryService() {
         setMediaNotificationProvider(notificationProvider)
 
         val loadControl = DefaultLoadControl.Builder()
-            .setBufferDurationsMs(15_000, 30_000, 1_500, 3_000)
-            .setTargetBufferBytes(6 * 1024 * 1024)
+            .setBufferDurationsMs(15_000, 45_000, 650, 1_400)
+            .setTargetBufferBytes(10 * 1024 * 1024)
             .setPrioritizeTimeOverSizeThresholds(true)
             .build()
 

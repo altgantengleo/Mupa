@@ -35,13 +35,15 @@ import com.xeno.mupa.streaming.api.StreamingLyricsProvider
 import com.xeno.mupa.streaming.api.StreamingRadioProvider
 import com.xeno.mupa.streaming.innertube.InnerTubeProvider
 import okhttp3.ConnectionPool
+import okhttp3.Dispatcher
+import okhttp3.OkHttpClient
+import okhttp3.Protocol
 import dagger.Binds
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
 import dagger.hilt.android.qualifiers.ApplicationContext
 import dagger.hilt.components.SingletonComponent
-import okhttp3.OkHttpClient
 import java.io.File
 import java.util.concurrent.TimeUnit
 import javax.inject.Singleton
@@ -84,12 +86,21 @@ object AppInfrastructureModule {
 
     @Provides
     @Singleton
-    fun provideOkHttpClient(): OkHttpClient = OkHttpClient.Builder()
-        .connectTimeout(3, TimeUnit.SECONDS)
-        .readTimeout(6, TimeUnit.SECONDS)
-        .callTimeout(7, TimeUnit.SECONDS)
-        .connectionPool(ConnectionPool(8, 5, TimeUnit.MINUTES))
-        .build()
+    fun provideOkHttpClient(): OkHttpClient {
+        val dispatcher = Dispatcher().apply {
+            maxRequests = 64
+            maxRequestsPerHost = 12
+        }
+        return OkHttpClient.Builder()
+            .dispatcher(dispatcher)
+            .protocols(listOf(Protocol.HTTP_2, Protocol.HTTP_1_1))
+            .connectTimeout(4, TimeUnit.SECONDS)
+            .readTimeout(12, TimeUnit.SECONDS)
+            .writeTimeout(8, TimeUnit.SECONDS)
+            .retryOnConnectionFailure(true)
+            .connectionPool(ConnectionPool(16, 5, TimeUnit.MINUTES))
+            .build()
+    }
 
     @Provides
     @Singleton

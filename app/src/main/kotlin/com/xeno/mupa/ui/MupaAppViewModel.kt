@@ -21,6 +21,7 @@ import com.xeno.mupa.data.local.LocalLibraryRepository
 import com.xeno.mupa.data.local.db.LyricsCacheDao
 import com.xeno.mupa.playback.MupaCrossfadeConfig
 import com.xeno.mupa.playback.eq.EqPreset
+import com.xeno.mupa.streaming.aggregator.ProviderPrewarmer
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -31,6 +32,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
 import java.io.File
 import javax.inject.Inject
 
@@ -64,12 +66,17 @@ class MupaAppViewModel @Inject constructor(
     private val musicSource: MusicSource,
     private val localLibraryRepository: LocalLibraryRepository,
     private val lyricsCacheDao: LyricsCacheDao,
+    private val okHttpClient: OkHttpClient,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(MupaAppUiState())
     val uiState: StateFlow<MupaAppUiState> = _uiState.asStateFlow()
 
     init {
+        // Pra-panas DNS + TLS + HTTP/2 pool semua provider di latar belakang saat aplikasi dibuka
+        viewModelScope.launch(Dispatchers.IO) {
+            ProviderPrewarmer.prewarm(okHttpClient)
+        }
         viewModelScope.launch {
             combine(
                 preferencesRepository.userPreferences,

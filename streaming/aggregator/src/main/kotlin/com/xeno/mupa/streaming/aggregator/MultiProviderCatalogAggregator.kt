@@ -95,6 +95,7 @@ class SwrCache<K : Any, V : Any>(
 object ProviderPrewarmer {
     private val warmUrls = listOf(
         "https://music.youtube.com/generate_204",
+        "https://www.youtube.com/generate_204",
         "https://api.deezer.com/infos",
         "https://itunes.apple.com/search?term=a&limit=1&country=ID",
         "https://discoveryprovider.audius.co/health_check",
@@ -117,22 +118,25 @@ object ProviderPrewarmer {
 }
 
 /**
- * Agregator katalog paralel/progresif lintas provider (Deezer + iTunes + InnerTube):
- * - Memanggil 2-3 provider secara paralel dengan batas konkurensi + circuit breaker + timeout 6 dtk.
- * - Hasil pertama langsung dipancarkan (Flow progresif), hasil berikutnya digabung + dedupe,
+ * Agregator katalog paralel/progresif lintas provider (Deezer + iTunes + InnerTube + Audius):
+ * - Memanggil seluruh provider secara paralel dengan batas konkurensi + circuit breaker + timeout ketat.
+ * - Hasil pertama langsung dipancarkan (Flow progresif ~250ms), hasil berikutnya digabung + dedupe,
  *   memprioritaskan kelengkapan gambar/foto HD dan relevansi.
- * - SWR cache membuat hasil ulang & daftar artis tampil seketika.
+ * - SWR cache membuat hasil ulang, profil artis, & rilisan tampil seketika (0 ms).
  */
 class MultiProviderCatalogAggregator(
     providers: List<CatalogProvider>,
     private val circuitBreaker: ProviderCircuitBreaker = ProviderCircuitBreaker(),
-    private val perProviderTimeoutMs: Long = 6_000L,
-    private val maxConcurrentRequests: Int = 4,
+    private val perProviderTimeoutMs: Long = 4_200L,
+    private val maxConcurrentRequests: Int = 8,
 ) {
     private val orderedProviders = providers.sortedBy { it.catalogPriority }
     private val concurrencyGate = Semaphore(maxConcurrentRequests)
     private val trackSearchCache = SwrCache<String, List<Track>>(ttlMs = 5 * 60_000L)
     private val artistSearchCache = SwrCache<String, List<Artist>>(ttlMs = 10 * 60_000L)
+    private val richSearchCache = SwrCache<String, RichSearchBundle>(ttlMs = 5 * 60_000L)
+    private val artistProfileCache = SwrCache<String, ArtistProfileBundle>(ttlMs = 10 * 60_000L)
+    private val releaseTracksCache = SwrCache<String, List<Track>>(ttlMs = 15 * 60_000L)
 
     fun searchTracksProgressive(query: String, limit: Int = 20): Flow<List<Track>> = channelFlow {
         val normQuery = query.trim().lowercase()
@@ -277,6 +281,149 @@ class MultiProviderCatalogAggregator(
     fun clearCaches() {
         trackSearchCache.clear()
         artistSearchCache.clear()
+        richSearchCache.clear()
+        artistProfileCache.clear()
+        releaseTracksCache.clear()
+    }
+
+    /**
+     * Aliran pencarian kaya progresif lintas 4 provider:
+     * - Cache SWR langsung tampil dalam 0 ms.
+     * - Hasil pertama (biasanya Deezer/iTunes ~250ms) langsung merender UI, lalu diperkaya
+     *   secara halus begitu YouTube Music, Audius, dan album resmi artis selesai.
+     */
+    fun observeSearchRichProgressive(query: String, trackLimit: Int = 60): Flow<RichSearchBundle> = channelFlow {
+        val trimmed = query.trim()
+        if (trimmed.isEmpty()) {
+            send(RichSearchBundle("", emptyList(), emptyList(), null, emptyList()))
+            return@channelFlow
+        }
+        val normKey = trimmed.lowercase()
+        val cached = richSearchCache.get(normKey)
+        if (cached != null) {
+            send(cached.value)
+            if (!cached.isStale) return@channelFlow
+        }
+
+        val deezer = orderedProviders.filterIsInstance<DeezerCatalogProvider>().firstOrNull()
+        val itunes = orderedProviders.filterIsInstance<ItunesCatalogProvider>().firstOrNull()
+        val normQ = SmartQueueFilter.normalizeArtist(trimmed)
+
+        val lock = Any()
+        var latestTracks: List<Track> = emptyList()
+        var latestArtists: List<Artist> = emptyList()
+        val rawReleases = mutableListOf<CatalogRelease>()
+        var fetchedTopArtistId: String? = null
+
+        fun buildSnapshot(): RichSearchBundle {
+            val rankedArtists = latestArtists.sortedWith(
+                compareByDescending<Artist> { artistMatchScore(it.name, normQ) }
+                    .thenByDescending { !it.artworkUrl.isNullOrBlank() },
+            )
+            val topArtist = rankedArtists.firstOrNull()?.takeIf { artistMatchScore(it.name, normQ) >= 80 }
+            val mergedReleases = mergeReleases(
+                rawReleases + deriveReleasesFromTracks(latestTracks),
+                normQ,
+                topArtist?.name,
+                limit = 24,
+            )
+            return RichSearchBundle(
+                query = trimmed,
+                tracks = latestTracks,
+                artists = rankedArtists,
+                topArtist = topArtist,
+                releases = mergedReleases,
+            )
+        }
+
+        coroutineScope {
+            // 1. Aliran lagu progresif (tiap provider yang selesai langsung memancarkan hasil)
+            launch(Dispatchers.IO) {
+                searchTracksProgressive(trimmed, limit = trackLimit).collect { tracks ->
+                    val snap = synchronized(lock) {
+                        latestTracks = tracks
+                        buildSnapshot()
+                    }
+                    if (snap.tracks.isNotEmpty() || snap.artists.isNotEmpty() || snap.releases.isNotEmpty()) {
+                        send(snap)
+                    }
+                }
+            }
+
+            // 2. Aliran artis progresif + otomatis muat album resmi bila topArtist cocok kuat
+            launch(Dispatchers.IO) {
+                observeArtistsProgressive(trimmed, limit = 16).collect { artists ->
+                    var topToLoadAlbums: Artist? = null
+                    val snap = synchronized(lock) {
+                        latestArtists = artists
+                        val s = buildSnapshot()
+                        val top = s.topArtist
+                        if (top != null && top.id != fetchedTopArtistId && deezer != null) {
+                            fetchedTopArtistId = top.id
+                            topToLoadAlbums = top
+                        }
+                        s
+                    }
+                    if (snap.tracks.isNotEmpty() || snap.artists.isNotEmpty() || snap.releases.isNotEmpty()) {
+                        send(snap)
+                    }
+                    val targetArtist = topToLoadAlbums
+                    if (targetArtist != null && deezer != null) {
+                        launch(Dispatchers.IO) {
+                            val albums = withTimeoutOrNull(3_000L) {
+                                deezer.getArtistAlbums(targetArtist.id, targetArtist.name, limit = 14)
+                                    .getOrDefault(emptyList())
+                            }.orEmpty()
+                            if (albums.isNotEmpty()) {
+                                val updated = synchronized(lock) {
+                                    rawReleases.addAll(0, albums)
+                                    buildSnapshot()
+                                }
+                                send(updated)
+                            }
+                        }
+                    }
+                }
+            }
+
+            // 3. Album Deezer paralel
+            if (deezer != null) {
+                launch(Dispatchers.IO) {
+                    val albums = withTimeoutOrNull(perProviderTimeoutMs) {
+                        deezer.searchAlbums(trimmed, limit = 14).getOrDefault(emptyList())
+                    }.orEmpty()
+                    if (albums.isNotEmpty()) {
+                        val snap = synchronized(lock) {
+                            rawReleases.addAll(albums)
+                            buildSnapshot()
+                        }
+                        send(snap)
+                    }
+                }
+            }
+
+            // 4. Album iTunes paralel
+            if (itunes != null) {
+                launch(Dispatchers.IO) {
+                    val albums = withTimeoutOrNull(perProviderTimeoutMs) {
+                        itunes.searchAlbums(trimmed, limit = 14).getOrDefault(emptyList())
+                    }.orEmpty()
+                    if (albums.isNotEmpty()) {
+                        val snap = synchronized(lock) {
+                            rawReleases.addAll(albums)
+                            buildSnapshot()
+                        }
+                        send(snap)
+                    }
+                }
+            }
+        }
+
+        val finalBundle = synchronized(lock) { buildSnapshot() }
+        if (finalBundle.tracks.isNotEmpty() || finalBundle.artists.isNotEmpty() || finalBundle.releases.isNotEmpty()) {
+            richSearchCache.put(normKey, finalBundle)
+            send(finalBundle)
+        }
     }
 
     /**
@@ -284,87 +431,27 @@ class MultiProviderCatalogAggregator(
      * mengembalikan hingga [trackLimit] lagu (default 60), daftar artis berfoto HD,
      * sorotan Artis Teratas (bila query cocok kuat dengan artis, mis. "jvke"), dan daftar Rilisan/Album.
      */
-    suspend fun searchRich(query: String, trackLimit: Int = 60): Result<RichSearchBundle> = coroutineScope {
-        val trimmed = query.trim()
-        if (trimmed.isEmpty()) {
-            return@coroutineScope Result.success(
-                RichSearchBundle(
-                    query = "",
-                    tracks = emptyList(),
-                    artists = emptyList(),
-                    topArtist = null,
-                    releases = emptyList(),
-                ),
-            )
-        }
-
-        val deezer = orderedProviders.filterIsInstance<DeezerCatalogProvider>().firstOrNull()
-        val itunes = orderedProviders.filterIsInstance<ItunesCatalogProvider>().firstOrNull()
-
-        val tracksJob = async(Dispatchers.IO) {
-            searchTracksMerged(trimmed, limit = trackLimit).getOrDefault(emptyList())
-        }
-        val artistsJob = async(Dispatchers.IO) {
-            getArtistsMerged(trimmed, limit = 16)
-        }
-        val dzAlbumsJob = async(Dispatchers.IO) {
-            withTimeoutOrNull(perProviderTimeoutMs) {
-                deezer?.searchAlbums(trimmed, limit = 14)?.getOrDefault(emptyList())
-            }.orEmpty()
-        }
-        val itAlbumsJob = async(Dispatchers.IO) {
-            withTimeoutOrNull(perProviderTimeoutMs) {
-                itunes?.searchAlbums(trimmed, limit = 14)?.getOrDefault(emptyList())
-            }.orEmpty()
-        }
-
-        val tracks = tracksJob.await()
-        val rawArtists = artistsJob.await()
-        val normQ = SmartQueueFilter.normalizeArtist(trimmed)
-
-        val rankedArtists = rawArtists.sortedWith(
-            compareByDescending<Artist> { artistMatchScore(it.name, normQ) }
-                .thenByDescending { !it.artworkUrl.isNullOrBlank() },
-        )
-        val topArtist = rankedArtists.firstOrNull()?.takeIf { artistMatchScore(it.name, normQ) >= 80 }
-
-        // Bila ada Artis Teratas (mis. "jvke"), ambil juga rilisan resminya agar album/EP/single-nya langsung tampil!
-        val topArtistAlbums = if (topArtist != null && deezer != null) {
-            withTimeoutOrNull(3_500L) {
-                deezer.getArtistAlbums(topArtist.id, topArtist.name, limit = 14).getOrDefault(emptyList())
-            }.orEmpty()
+    suspend fun searchRich(query: String, trackLimit: Int = 60): Result<RichSearchBundle> {
+        var latest: RichSearchBundle? = null
+        observeSearchRichProgressive(query, trackLimit).collect { latest = it }
+        val bundle = latest
+        return if (bundle != null && (bundle.tracks.isNotEmpty() || bundle.artists.isNotEmpty() || bundle.releases.isNotEmpty() || query.isBlank())) {
+            Result.success(bundle)
         } else {
-            emptyList()
-        }
-
-        // Gabungkan rilisan dari album artis teratas + Deezer album search + iTunes album search + grup album dari tracks
-        val derivedFromTracks = deriveReleasesFromTracks(tracks)
-        val mergedReleases = mergeReleases(
-            topArtistAlbums + dzAlbumsJob.await() + itAlbumsJob.await() + derivedFromTracks,
-            normQ,
-            topArtist?.name,
-            limit = 24,
-        )
-
-        if (tracks.isEmpty() && rankedArtists.isEmpty() && mergedReleases.isEmpty()) {
-            Result.failure(com.xeno.mupa.streaming.api.StreamingError.Unavailable("Hasil tidak ditemukan untuk \"$trimmed\""))
-        } else {
-            Result.success(
-                RichSearchBundle(
-                    query = trimmed,
-                    tracks = tracks,
-                    artists = rankedArtists,
-                    topArtist = topArtist,
-                    releases = mergedReleases,
-                ),
-            )
+            Result.failure(com.xeno.mupa.streaming.api.StreamingError.Unavailable("Hasil tidak ditemukan untuk \"${query.trim()}\""))
         }
     }
 
     /**
-     * Memuat profil lengkap seorang artis (Lagu Populer hingga 40 lagu + daftar Rilisan/Album/EP/Single).
+     * Memuat profil lengkap seorang artis (Lagu Populer hingga 40 lagu + daftar Rilisan/Album/EP/Single) dengan SWR cache.
      */
     suspend fun getArtistProfile(artist: Artist): ArtistProfileBundle = coroutineScope {
+        val cacheKey = "${artist.id}|${artist.name.lowercase()}"
+        val cached = artistProfileCache.get(cacheKey)
+        if (cached != null && !cached.isStale) {
+            return@coroutineScope cached.value
+        }
+
         val deezer = orderedProviders.filterIsInstance<DeezerCatalogProvider>().firstOrNull()
         val itunes = orderedProviders.filterIsInstance<ItunesCatalogProvider>().firstOrNull()
 
@@ -402,17 +489,26 @@ class MultiProviderCatalogAggregator(
             limit = 24,
         )
 
-        ArtistProfileBundle(
+        val bundle = ArtistProfileBundle(
             artist = artist,
             topTracks = topTracks,
             releases = releases,
         )
+        if (topTracks.isNotEmpty() || releases.isNotEmpty()) {
+            artistProfileCache.put(cacheKey, bundle)
+        }
+        bundle
     }
 
     /**
-     * Memuat daftar lagu lengkap untuk sebuah Rilisan/Album/EP/Single.
+     * Memuat daftar lagu lengkap untuk sebuah Rilisan/Album/EP/Single dengan cache memori.
      */
     suspend fun getReleaseTracks(release: CatalogRelease): List<Track> = coroutineScope {
+        val cached = releaseTracksCache.get(release.id)
+        if (cached != null && !cached.isStale) {
+            return@coroutineScope cached.value
+        }
+
         val deezer = orderedProviders.filterIsInstance<DeezerCatalogProvider>().firstOrNull()
         val itunes = orderedProviders.filterIsInstance<ItunesCatalogProvider>().firstOrNull()
 
@@ -429,11 +525,15 @@ class MultiProviderCatalogAggregator(
             }
             else -> emptyList()
         }
-        if (direct.isNotEmpty()) return@coroutineScope direct
-        if (release.cachedTracks.isNotEmpty()) return@coroutineScope release.cachedTracks
-
-        // Fallback: cari berdasarkan judul album + artis
-        searchTracksMerged("${release.artistName} ${release.title}", limit = 25).getOrDefault(emptyList())
+        val resolved = when {
+            direct.isNotEmpty() -> direct
+            release.cachedTracks.isNotEmpty() -> release.cachedTracks
+            else -> searchTracksMerged("${release.artistName} ${release.title}", limit = 25).getOrDefault(emptyList())
+        }
+        if (resolved.isNotEmpty()) {
+            releaseTracksCache.put(release.id, resolved)
+        }
+        resolved
     }
 
     private fun artistMatchScore(artistName: String, normQuery: String): Int {
