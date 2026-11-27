@@ -1,0 +1,54 @@
+{
+  "query": "blue",
+  "results": [
+    {
+      "id": "IpFX2vq8HKw",
+      "title": "blue",
+      "artistName": "yung kai",
+      "albumTitle": "blue - Single",
+      "durationMs": 214000
+    },
+    {
+      "id": "blue_slowed_01",
+      "title": "blue (Slowed + Reverb)",
+      "artistName": "yung kai",
+      "albumTitle": null,
+      "durationMs": 248000
+    },
+    {
+      "id": "blue_acoustic_02",
+      "title": "blue (Acoustic Version)",
+      "artistName": "yung kai",
+      "albumTitle": null,
+      "durationMs": 205000
+    },
+    {
+      "id": "blue_live_03",
+      "title": "blue - Live Session",
+      "artistName": "yung kai",
+      "albumTitle": null,
+      "durationMs": 229000
+    },
+    {
+      "id": "blue_karaoke_04",
+      "title": "blue (Instrumental Karaoke)",
+      "artistName": "Karaoke Studio",
+      "albumTitle": null,
+      "durationMs": 214000
+    },
+    {
+      "id": "blue_spedup_05",
+      "title": "blue (Sped Up)",
+      "artistName": "yung kai",
+      "albumTitle": null,
+      "durationMs": 176000
+    },
+    {
+      "id": "blue_lyric_06",
+      "title": "blue (Official Lyric Video)",
+      "artistName": "yung kai",
+      "albumTitle": null,
+      "durationMs": 215000
+    }
+  ]
+}
