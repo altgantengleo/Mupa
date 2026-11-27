@@ -54,9 +54,69 @@ interface StreamingAudioProvider {
 
 interface StreamingCatalogProvider {
     val providerId: String
+    val catalogPriority: Int get() = 20
     suspend fun searchTracks(query: String, limit: Int = 20): Result<List<Track>>
     suspend fun searchArtists(query: String, limit: Int = 16): Result<List<Artist>>
     suspend fun getArtistTopTracks(artistId: String, artistName: String): Result<List<Track>>
+    suspend fun getTrendingArtists(limit: Int = 24): Result<List<Artist>> = Result.success(emptyList())
+}
+
+/** Alias eksplisit pemisahan kapabilitas Fase 2T. */
+typealias CatalogProvider = StreamingCatalogProvider
+typealias StreamProvider = StreamingAudioProvider
+
+/**
+ * Instrumentasi latensi lokal khusus debug (TIDAK pernah mengirim data ke mana pun).
+ * Mencatat time-to-first-result (katalog) dan time-to-audio (resolusi stream) di memori.
+ */
+object MupaStreamingDiagnostics {
+    data class MetricSample(
+        val kind: String,
+        val label: String,
+        val providerId: String,
+        val durationMs: Long,
+        val fromCache: Boolean,
+        val recordedAtMs: Long,
+    )
+
+    @Volatile
+    var isDebugLoggingEnabled: Boolean = false
+
+    @Volatile
+    var logger: ((String) -> Unit)? = null
+
+    private val lock = Any()
+    private val samples = ArrayDeque<MetricSample>(64)
+
+    fun recordFirstResult(label: String, providerId: String, durationMs: Long, fromCache: Boolean = false) {
+        record("first_result", label, providerId, durationMs, fromCache)
+    }
+
+    fun recordTimeToAudio(label: String, providerId: String, durationMs: Long, fromCache: Boolean = false) {
+        record("time_to_audio", label, providerId, durationMs, fromCache)
+    }
+
+    private fun record(kind: String, label: String, providerId: String, durationMs: Long, fromCache: Boolean) {
+        val sample = MetricSample(
+            kind = kind,
+            label = label,
+            providerId = providerId,
+            durationMs = durationMs.coerceAtLeast(0L),
+            fromCache = fromCache,
+            recordedAtMs = System.currentTimeMillis(),
+        )
+        synchronized(lock) {
+            if (samples.size >= 64) samples.removeFirst()
+            samples.addLast(sample)
+        }
+        if (isDebugLoggingEnabled) {
+            logger?.invoke("MupaPerf[$kind] provider=$providerId label=\"$label\" ms=${sample.durationMs} cache=$fromCache")
+        }
+    }
+
+    fun snapshot(): List<MetricSample> = synchronized(lock) { samples.toList() }
+
+    fun clear() = synchronized(lock) { samples.clear() }
 }
 
 data class RadioPage(

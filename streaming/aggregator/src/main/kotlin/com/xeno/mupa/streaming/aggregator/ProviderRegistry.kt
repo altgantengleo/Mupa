@@ -1,10 +1,15 @@
 package com.xeno.mupa.streaming.aggregator
 
 import com.xeno.mupa.core.domain.ResolvedStream
+import com.xeno.mupa.streaming.api.MupaStreamingDiagnostics
 import com.xeno.mupa.streaming.api.StreamLookupRequest
 import com.xeno.mupa.streaming.api.StreamingAudioProvider
 import com.xeno.mupa.streaming.api.StreamingError
+import kotlinx.coroutines.async
+import kotlinx.coroutines.cancelChildren
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.selects.select
 import java.util.concurrent.ConcurrentHashMap
 
 /**
@@ -97,6 +102,7 @@ class ProviderRegistry(
     private val urlCache: ThreadSafeStreamUrlCache = ThreadSafeStreamUrlCache(),
     private val maxRetryPerProvider: Int = 1,
     private val baseRetryDelayMs: Long = 350L,
+    private val hedgeDelayMs: Long = 800L,
 ) {
     private val orderedProviders: List<StreamingAudioProvider> = providers.sortedBy { it.priority }
 
@@ -113,8 +119,10 @@ class ProviderRegistry(
     }
 
     suspend fun resolve(request: StreamLookupRequest, forceRefresh: Boolean = false): Result<ResolutionOutcome> {
+        val startMs = System.currentTimeMillis()
         if (!forceRefresh) {
             urlCache.get(request.trackId)?.let { cached ->
+                MupaStreamingDiagnostics.recordTimeToAudio(request.title, "cache", 0L, fromCache = true)
                 return Result.success(
                     ResolutionOutcome(
                         providerId = "cache",
@@ -127,9 +135,27 @@ class ProviderRegistry(
             urlCache.invalidate(request.trackId)
         }
 
+        val activeProviders = orderedProviders.filterNot { circuitBreaker.isOpen(it.providerId) }
+        if (activeProviders.isEmpty()) {
+            val firstId = orderedProviders.firstOrNull()?.providerId ?: "none"
+            return Result.failure(
+                if (orderedProviders.isNotEmpty()) StreamingError.CircuitOpen(firstId)
+                else StreamingError.Unavailable("Tidak ada penyedia streaming aktif"),
+            )
+        }
+
+        // Hedged resolution (~800ms): jalankan provider primer lebih dulu; bila belum selesai dalam hedgeDelayMs
+        // dan ada provider kedua, picu provider kedua secara paralel lalu ambil respons sukses pertama.
+        if (activeProviders.size >= 2 && hedgeDelayMs > 0L) {
+            val primary = activeProviders[0]
+            val secondary = activeProviders[1]
+            val hedged = resolveHedgedPair(primary, secondary, request, startMs)
+            if (hedged != null) return Result.success(hedged)
+        }
+
         var lastError: Throwable = StreamingError.Unavailable("Tidak ada penyedia streaming aktif")
 
-        for (provider in orderedProviders) {
+        for (provider in activeProviders) {
             if (circuitBreaker.isOpen(provider.providerId)) {
                 lastError = StreamingError.CircuitOpen(provider.providerId)
                 continue
@@ -140,6 +166,11 @@ class ProviderRegistry(
             if (stream != null) {
                 circuitBreaker.recordSuccess(provider.providerId)
                 urlCache.put(request.trackId, stream)
+                MupaStreamingDiagnostics.recordTimeToAudio(
+                    label = request.title,
+                    providerId = provider.providerId,
+                    durationMs = System.currentTimeMillis() - startMs,
+                )
                 return Result.success(
                     ResolutionOutcome(
                         providerId = provider.providerId,
@@ -159,6 +190,81 @@ class ProviderRegistry(
         }
 
         return Result.failure(lastError)
+    }
+
+    private suspend fun resolveHedgedPair(
+        primary: StreamingAudioProvider,
+        secondary: StreamingAudioProvider,
+        request: StreamLookupRequest,
+        startMs: Long,
+    ): ResolutionOutcome? = coroutineScope {
+        val primaryDeferred = async { primary.providerId to resolveWithRetry(primary, request) }
+        val earlyPrimary = select<Pair<String, Result<ResolvedStream>>?> {
+            primaryDeferred.onAwait { it }
+            async { delay(hedgeDelayMs) }.onAwait { null }
+        }
+        if (earlyPrimary != null) {
+            val stream = earlyPrimary.second.getOrNull()
+            if (stream != null) {
+                coroutineContext.cancelChildren()
+                return@coroutineScope finalizeSuccess(earlyPrimary.first, stream, request, startMs)
+            }
+            recordError(earlyPrimary.first, earlyPrimary.second.exceptionOrNull())
+            val secResult = resolveWithRetry(secondary, request)
+            val secStream = secResult.getOrNull()
+            coroutineContext.cancelChildren()
+            return@coroutineScope if (secStream != null) {
+                finalizeSuccess(secondary.providerId, secStream, request, startMs)
+            } else {
+                recordError(secondary.providerId, secResult.exceptionOrNull())
+                null
+            }
+        }
+
+        // Primary melewati 800ms -> picu secondary secara hedged paralel
+        val secondaryDeferred = async { secondary.providerId to resolveWithRetry(secondary, request) }
+        val firstWinner = select<Pair<String, Result<ResolvedStream>>> {
+            primaryDeferred.onAwait { it }
+            secondaryDeferred.onAwait { it }
+        }
+        val firstStream = firstWinner.second.getOrNull()
+        if (firstStream != null) {
+            coroutineContext.cancelChildren()
+            return@coroutineScope finalizeSuccess(firstWinner.first, firstStream, request, startMs)
+        }
+        recordError(firstWinner.first, firstWinner.second.exceptionOrNull())
+
+        val other = if (firstWinner.first == primary.providerId) secondaryDeferred.await() else primaryDeferred.await()
+        val otherStream = other.second.getOrNull()
+        coroutineContext.cancelChildren()
+        if (otherStream != null) {
+            finalizeSuccess(other.first, otherStream, request, startMs)
+        } else {
+            recordError(other.first, other.second.exceptionOrNull())
+            null
+        }
+    }
+
+    private fun finalizeSuccess(
+        providerId: String,
+        stream: ResolvedStream,
+        request: StreamLookupRequest,
+        startMs: Long,
+    ): ResolutionOutcome {
+        circuitBreaker.recordSuccess(providerId)
+        urlCache.put(request.trackId, stream)
+        MupaStreamingDiagnostics.recordTimeToAudio(
+            label = request.title,
+            providerId = providerId,
+            durationMs = System.currentTimeMillis() - startMs,
+        )
+        return ResolutionOutcome(providerId = providerId, stream = stream, fromCache = false)
+    }
+
+    private fun recordError(providerId: String, err: Throwable?) {
+        if (err != null && (err !is StreamingError || err.tripsCircuitBreaker)) {
+            circuitBreaker.recordFailure(providerId)
+        }
     }
 
     private suspend fun resolveWithRetry(

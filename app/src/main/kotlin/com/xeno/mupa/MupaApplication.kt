@@ -5,13 +5,20 @@ import android.app.Application
 import android.content.ComponentCallbacks2
 import android.content.Context
 import android.os.StrictMode
+import android.util.Log
 import coil3.ImageLoader
 import coil3.PlatformContext
 import coil3.SingletonImageLoader
 import coil3.disk.DiskCache
 import coil3.memory.MemoryCache
 import coil3.request.crossfade
+import com.xeno.mupa.streaming.aggregator.ProviderPrewarmer
+import com.xeno.mupa.streaming.api.MupaStreamingDiagnostics
 import dagger.hilt.android.HiltAndroidApp
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 import okhttp3.OkHttpClient
 import okio.Path.Companion.toOkioPath
 import java.io.File
@@ -29,10 +36,18 @@ class MupaApplication : Application(), SingletonImageLoader.Factory {
             return am?.isLowRamDevice == true
         }
 
+    private val appScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
     override fun onCreate() {
         super.onCreate()
+        MupaStreamingDiagnostics.isDebugLoggingEnabled = BuildConfig.DEBUG
         if (BuildConfig.DEBUG) {
+            MupaStreamingDiagnostics.logger = { msg -> Log.d("MupaPerf", msg) }
             enableDebugStrictMode()
+        }
+        // Pra-panas DNS/TLS/HTTP2 ke host provider secara ringan di background
+        if (::okHttpClient.isInitialized) {
+            appScope.launch { ProviderPrewarmer.prewarm(okHttpClient) }
         }
     }
 

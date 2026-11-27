@@ -31,6 +31,8 @@ import com.xeno.mupa.playback.MupaPlaybackService
 import com.xeno.mupa.playback.QueuePersistenceStore
 import com.xeno.mupa.playback.eq.EqPreset
 import com.xeno.mupa.playback.eq.FiveBandEqualizerProcessor
+import com.xeno.mupa.streaming.aggregator.ProviderRegistry
+import com.xeno.mupa.streaming.api.StreamLookupRequest
 import com.xeno.mupa.streaming.api.StreamingError
 import com.xeno.mupa.streaming.api.StreamingRadioProvider
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -58,6 +60,7 @@ class MupaPlayerViewModel @Inject constructor(
     private val lyricsRepository: LyricsRepository,
     private val localLibraryRepository: LocalLibraryRepository,
     private val radioProvider: StreamingRadioProvider,
+    private val providerRegistry: ProviderRegistry,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(MupaPlayerUiState())
@@ -70,6 +73,7 @@ class MupaPlayerViewModel @Inject constructor(
     private var lyricsFetchJob: Job? = null
     private var udExtractJob: Job? = null
     private var radioLoadJob: Job? = null
+    private var preResolveJob: Job? = null
 
     @Volatile
     private var isCleared: Boolean = false
@@ -131,6 +135,7 @@ class MupaPlayerViewModel @Inject constructor(
                 extractUltraDynamicForTrack(track)
                 fetchLyricsForCurrentTrack()
                 maybeLoadMoreRadioQueue()
+                preResolveNextTrack()
             }
         }
 
@@ -456,8 +461,29 @@ class MupaPlayerViewModel @Inject constructor(
         // Pre-fetch lirik & ekstraksi palet Ultra Dynamic di latar belakang
         extractUltraDynamicForTrack(track)
         fetchLyricsForCurrentTrack()
+        preResolveNextTrack()
         if (resolvedSource.isInfinite && tracks.size - 1 - safeIndex <= 3 && resolvedSource !is QueueSource.Radio) {
             maybeLoadMoreRadioQueue()
+        }
+    }
+
+    /** Pra-resolusi HANYA 1 lagu berikutnya di antrean (bukan massal) agar transisi terasa instan. */
+    private fun preResolveNextTrack() {
+        val state = _uiState.value
+        val nextTrack = state.queue.getOrNull(state.currentIndex + 1) ?: return
+        if (nextTrack.sourceType != AudioSourceType.STREAMING) return
+        preResolveJob?.cancel()
+        preResolveJob = viewModelScope.launch(Dispatchers.IO) {
+            runCatching {
+                providerRegistry.resolve(
+                    StreamLookupRequest(
+                        trackId = nextTrack.id,
+                        title = nextTrack.title,
+                        artistName = nextTrack.artistName,
+                        durationMs = nextTrack.durationMs,
+                    ),
+                )
+            }
         }
     }
 

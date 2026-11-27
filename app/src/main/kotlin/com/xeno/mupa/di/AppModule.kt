@@ -26,11 +26,14 @@ import com.xeno.mupa.playback.MupaAudioCache
 import com.xeno.mupa.playback.PlaybackServiceConfig
 import com.xeno.mupa.playback.QueuePersistenceStore
 import com.xeno.mupa.playback.eq.FiveBandEqualizerProcessor
+import com.xeno.mupa.streaming.aggregator.MultiProviderCatalogAggregator
 import com.xeno.mupa.streaming.aggregator.ProviderRegistry
+import com.xeno.mupa.streaming.aggregator.providers.DeezerCatalogProvider
+import com.xeno.mupa.streaming.aggregator.providers.ItunesCatalogProvider
 import com.xeno.mupa.streaming.api.StreamingLyricsProvider
 import com.xeno.mupa.streaming.api.StreamingRadioProvider
 import com.xeno.mupa.streaming.innertube.InnerTubeProvider
-import com.xeno.mupa.streaming.jiosaavn.JioSaavnProvider
+import okhttp3.ConnectionPool
 import dagger.Binds
 import dagger.Module
 import dagger.Provides
@@ -81,8 +84,10 @@ object AppInfrastructureModule {
     @Provides
     @Singleton
     fun provideOkHttpClient(): OkHttpClient = OkHttpClient.Builder()
-        .connectTimeout(10, TimeUnit.SECONDS)
-        .readTimeout(15, TimeUnit.SECONDS)
+        .connectTimeout(3, TimeUnit.SECONDS)
+        .readTimeout(6, TimeUnit.SECONDS)
+        .callTimeout(7, TimeUnit.SECONDS)
+        .connectionPool(ConnectionPool(8, 5, TimeUnit.MINUTES))
         .build()
 
     @Provides
@@ -92,21 +97,35 @@ object AppInfrastructureModule {
 
     @Provides
     @Singleton
+    fun provideDeezerCatalogProvider(client: OkHttpClient): DeezerCatalogProvider =
+        DeezerCatalogProvider(client)
+
+    @Provides
+    @Singleton
+    fun provideItunesCatalogProvider(client: OkHttpClient): ItunesCatalogProvider =
+        ItunesCatalogProvider(client)
+
+    @Provides
+    @Singleton
+    fun provideMultiProviderCatalogAggregator(
+        deezer: DeezerCatalogProvider,
+        itunes: ItunesCatalogProvider,
+        innerTube: InnerTubeProvider,
+    ): MultiProviderCatalogAggregator = MultiProviderCatalogAggregator(
+        providers = listOf(deezer, itunes, innerTube),
+    )
+
+    @Provides
+    @Singleton
     fun provideStreamingRadioProvider(innerTubeProvider: InnerTubeProvider): StreamingRadioProvider =
         innerTubeProvider
 
     @Provides
     @Singleton
-    fun provideJioSaavnProvider(client: OkHttpClient): JioSaavnProvider =
-        JioSaavnProvider(client)
-
-    @Provides
-    @Singleton
     fun provideProviderRegistry(
         innerTubeProvider: InnerTubeProvider,
-        jioSaavnProvider: JioSaavnProvider,
     ): ProviderRegistry = ProviderRegistry(
-        providers = listOf(innerTubeProvider, jioSaavnProvider),
+        providers = listOf(innerTubeProvider),
     )
 
     @Provides

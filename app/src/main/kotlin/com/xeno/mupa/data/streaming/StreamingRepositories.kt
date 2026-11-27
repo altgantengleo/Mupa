@@ -13,11 +13,19 @@ import com.xeno.mupa.data.fake.FakeArtistRepository
 import com.xeno.mupa.data.local.LocalLibraryRepository
 import com.xeno.mupa.engine.local.LocalTrackItem
 import com.xeno.mupa.engine.local.MixMupaLocalRecommender
+import com.xeno.mupa.streaming.aggregator.MultiProviderCatalogAggregator
+import com.xeno.mupa.streaming.aggregator.SwrCache
 import com.xeno.mupa.streaming.innertube.InnerTubeProvider
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -41,7 +49,7 @@ private data class CachedArtistRecord(
 @Singleton
 class StreamingArtistRepository @Inject constructor(
     @ApplicationContext appContext: Context,
-    private val innerTubeProvider: InnerTubeProvider,
+    private val catalogAggregator: MultiProviderCatalogAggregator,
     private val localLibraryRepository: LocalLibraryRepository,
     private val fallbackCurated: FakeArtistRepository,
 ) : ArtistRepository {
@@ -50,14 +58,15 @@ class StreamingArtistRepository @Inject constructor(
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
     private val knownArtistsById = ConcurrentHashMap<String, Artist>()
 
-    @Volatile
-    private var cachedTrendingArtists: List<Artist> = emptyList()
-
     init {
         loadDiskArtistCache()
     }
 
-    override suspend fun getSuggestedArtists(query: String): Result<List<Artist>> {
+    /**
+     * Aliran progresif multi-sumber (Deezer + iTunes + InnerTube paralel) untuk Onboarding Artis:
+     * hasil tercepat langsung tampil, lalu digabung + dedupe (nama dinormalisasi) + utamakan berfoto.
+     */
+    fun observeSuggestedArtists(query: String): Flow<List<Artist>> = flow {
         val trimmed = query.trim()
         val localItems = localLibraryRepository.getAllLocalTracks().map { track ->
             LocalTrackItem(track = track, contentUri = track.id, importedAtMs = track.dateAddedEpochMs)
@@ -65,31 +74,30 @@ class StreamingArtistRepository @Inject constructor(
         val localArtists = MixMupaLocalRecommender.aggregateLocalArtists(localItems)
             .filter { trimmed.isEmpty() || it.name.contains(trimmed, ignoreCase = true) }
 
-        val onlineArtists = if (trimmed.length < 2) {
-            cachedTrendingArtists.ifEmpty {
-                innerTubeProvider.getTrendingArtists(limit = 24)
-                    .getOrDefault(emptyList())
-                    .also { fetched ->
-                        if (fetched.isNotEmpty()) cachedTrendingArtists = fetched
-                    }
+        var emittedAny = false
+        catalogAggregator.observeArtistsProgressive(trimmed, limit = 28).collect { onlineArtists ->
+            val merged = (onlineArtists + localArtists)
+                .distinctBy { it.name.lowercase() }
+                .sortedByDescending { !it.artworkUrl.isNullOrBlank() }
+            if (merged.isNotEmpty()) {
+                emittedAny = true
+                merged.forEach { knownArtistsById[it.id] = it }
+                saveDiskArtistCache()
+                emit(merged)
             }
-        } else {
-            innerTubeProvider.searchArtists(trimmed, limit = 18).getOrDefault(emptyList())
         }
-
-        val merged = buildList {
-            addAll(onlineArtists)
-            addAll(localArtists)
-            if (onlineArtists.isEmpty()) {
-                addAll(fallbackCurated.getSuggestedArtists(trimmed).getOrDefault(emptyList()))
-            }
-        }.distinctBy { it.name.lowercase() }
-
-        if (merged.isNotEmpty()) {
-            merged.forEach { knownArtistsById[it.id] = it }
-            saveDiskArtistCache()
+        if (!emittedAny) {
+            val fallback = (localArtists + fallbackCurated.getSuggestedArtists(trimmed).getOrDefault(emptyList()))
+                .distinctBy { it.name.lowercase() }
+            fallback.forEach { knownArtistsById[it.id] = it }
+            emit(fallback)
         }
-        return Result.success(merged)
+    }
+
+    override suspend fun getSuggestedArtists(query: String): Result<List<Artist>> {
+        var latest: List<Artist> = emptyList()
+        observeSuggestedArtists(query).collect { latest = it }
+        return Result.success(latest)
     }
 
     override suspend fun getArtistsByIds(ids: Set<String>): Result<List<Artist>> {
@@ -143,6 +151,7 @@ class StreamingArtistRepository @Inject constructor(
 @Singleton
 class StreamingMusicSource @Inject constructor(
     private val innerTubeProvider: InnerTubeProvider,
+    private val catalogAggregator: MultiProviderCatalogAggregator,
     private val artistRepository: StreamingArtistRepository,
     private val localLibraryRepository: LocalLibraryRepository,
 ) : MusicSource {
@@ -150,13 +159,33 @@ class StreamingMusicSource @Inject constructor(
     override val sourceId: String = "mupa_strict_source"
 
     private val cachedStreamingCollection = ConcurrentHashMap<String, Track>()
+    private val homeSwrCache = SwrCache<String, List<Playlist>>(ttlMs = 5 * 60_000L)
+    private val bgScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     override suspend fun getHomeRecommendations(
         seedArtistIds: Set<String>,
         source: AudioSourceType,
     ): Result<List<Playlist>> = when (source) {
         AudioSourceType.LOCAL -> buildLocalHomeShelves()
-        AudioSourceType.STREAMING -> buildStreamingHomeShelves(seedArtistIds)
+        AudioSourceType.STREAMING -> getStreamingHomeWithSwr(seedArtistIds)
+    }
+
+    private suspend fun getStreamingHomeWithSwr(seedArtistIds: Set<String>): Result<List<Playlist>> {
+        val cacheKey = seedArtistIds.sorted().joinToString(",")
+        val cached = homeSwrCache.get(cacheKey)
+        if (cached != null && cached.value.isNotEmpty()) {
+            if (cached.isStale) {
+                bgScope.launch {
+                    buildStreamingHomeShelves(seedArtistIds).onSuccess { fresh ->
+                        homeSwrCache.put(cacheKey, fresh)
+                    }
+                }
+            }
+            return Result.success(cached.value)
+        }
+        return buildStreamingHomeShelves(seedArtistIds).onSuccess { fresh ->
+            homeSwrCache.put(cacheKey, fresh)
+        }
     }
 
     override suspend fun searchTracks(
@@ -170,7 +199,7 @@ class StreamingMusicSource @Inject constructor(
             }
             AudioSourceType.STREAMING -> {
                 val effectiveQuery = if (trimmed.length < 2) "Lagu Pop Indonesia" else trimmed
-                innerTubeProvider.searchTracks(effectiveQuery, limit = 20)
+                catalogAggregator.searchTracksMerged(effectiveQuery, limit = 20)
                     .onSuccess { list ->
                         list.forEach { cachedStreamingCollection[it.id] = it }
                     }

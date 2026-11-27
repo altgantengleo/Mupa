@@ -40,13 +40,15 @@ class InnerTubeProvider(
 
     override val providerId: String = "innertube"
     override val priority: Int = 10
+    override val catalogPriority: Int = 30
     override val supportsDirectTrackId: Boolean = true
 
     private data class CachedVisitor(val visitorData: String, val expiresAtMs: Long)
 
     private val visitorCache = ConcurrentHashMap<String, CachedVisitor>()
+    private val crossMatchVideoIdCache = ConcurrentHashMap<String, String>()
 
-    suspend fun getTrendingArtists(limit: Int = 24): Result<List<Artist>> =
+    override suspend fun getTrendingArtists(limit: Int): Result<List<Artist>> =
         withContext(Dispatchers.IO) {
             val bodyJson = buildJsonObject {
                 put("context", InnerTubeProfiles.WEB_REMIX.buildContextJson())
@@ -271,11 +273,19 @@ class InnerTubeProvider(
             val videoId = if (isLikelyYouTubeVideoId(request.trackId)) {
                 request.trackId
             } else {
-                searchTracks("${request.artistName} ${request.title}", limit = 1)
-                    .getOrNull()?.firstOrNull()?.id
-                    ?: return@withContext Result.failure(
-                        StreamingError.Unavailable("VideoId InnerTube tidak ditemukan untuk ${request.title}"),
-                    )
+                crossMatchVideoIdCache[request.trackId] ?: run {
+                    // Pencocokan lintas provider ketat (judul + artis + durasi +-3 dtk) agar tidak memutar lagu salah
+                    val candidates = searchTracks("${request.artistName} ${request.title}", limit = 6)
+                        .getOrDefault(emptyList())
+                    val matched = pickBestStrictMatch(request, candidates)
+                        ?: return@withContext Result.failure(
+                            StreamingError.Unavailable(
+                                "Tidak ditemukan audio cocok untuk \"${request.title}\" - ${request.artistName}",
+                            ),
+                        )
+                    crossMatchVideoIdCache[request.trackId] = matched.id
+                    matched.id
+                }
             }
 
             var lastError: Throwable = StreamingError.Unavailable("Semua klien InnerTube gagal")
@@ -420,6 +430,51 @@ class InnerTubeProvider(
             if (newPipeReady.compareAndSet(false, true)) {
                 NewPipe.init(OkHttpNewPipeDownloader(client))
             }
+        }
+
+        internal fun pickBestStrictMatch(
+            request: StreamLookupRequest,
+            candidates: List<Track>,
+        ): Track? {
+            val targetTitle = com.xeno.mupa.core.model.SmartQueueFilter.normalizeTitle(request.title)
+            val targetArtist = com.xeno.mupa.core.model.SmartQueueFilter.normalizeArtist(request.artistName)
+            val targetIsAlt = com.xeno.mupa.core.model.SmartQueueFilter.isAlternateVersionTitle(request.title)
+            var bestTrack: Track? = null
+            var bestScore = 0f
+            for (cand in candidates) {
+                val candTitle = com.xeno.mupa.core.model.SmartQueueFilter.normalizeTitle(cand.title)
+                val candArtist = com.xeno.mupa.core.model.SmartQueueFilter.normalizeArtist(cand.artistName)
+                val titleSim = tokenSim(targetTitle, candTitle) * 0.50f
+                val artistSim = if (targetArtist.isNotEmpty() && candArtist.isNotEmpty()) {
+                    tokenSim(targetArtist, candArtist) * 0.35f
+                } else {
+                    0.18f
+                }
+                val durSim = when {
+                    request.durationMs <= 0L || cand.durationMs <= 0L -> 0.10f
+                    kotlin.math.abs(request.durationMs - cand.durationMs) <= 3_000L -> 0.15f
+                    kotlin.math.abs(request.durationMs - cand.durationMs) <= 8_000L -> 0.08f
+                    kotlin.math.abs(request.durationMs - cand.durationMs) <= 15_000L -> 0.0f
+                    else -> -0.35f
+                }
+                val altPenalty = if (!targetIsAlt && com.xeno.mupa.core.model.SmartQueueFilter.isAlternateVersionTitle(cand.title)) -0.40f else 0f
+                val score = (titleSim + artistSim + durSim + altPenalty).coerceIn(0f, 1f)
+                if (score > bestScore) {
+                    bestScore = score
+                    bestTrack = cand
+                }
+            }
+            return if (bestScore >= 0.72f) bestTrack else null
+        }
+
+        private fun tokenSim(a: String, b: String): Float {
+            if (a.isEmpty() || b.isEmpty()) return 0f
+            if (a == b) return 1f
+            if (a.contains(b) || b.contains(a)) return 0.90f
+            val ta = a.split(' ').filter { it.isNotBlank() }.toSet()
+            val tb = b.split(' ').filter { it.isNotBlank() }.toSet()
+            val union = ta.union(tb).size.toFloat()
+            return if (union > 0f) ta.intersect(tb).size.toFloat() / union else 0f
         }
     }
 }

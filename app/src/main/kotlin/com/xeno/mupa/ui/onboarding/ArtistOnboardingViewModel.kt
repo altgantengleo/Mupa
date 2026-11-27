@@ -7,7 +7,10 @@ import androidx.lifecycle.viewModelScope
 import com.xeno.mupa.core.domain.ArtistRepository
 import com.xeno.mupa.core.domain.PreferencesRepository
 import com.xeno.mupa.core.model.Artist
+import com.xeno.mupa.data.streaming.StreamingArtistRepository
 import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -103,21 +106,50 @@ class ArtistOnboardingViewModel @Inject constructor(
         }
     }
 
+    private var loadJob: Job? = null
+
     private fun loadArtists(query: String) {
-        viewModelScope.launch {
-            _uiState.update { it.copy(isLoading = true, errorMessage = null) }
-            artistRepository.getSuggestedArtists(query)
-                .onSuccess { list ->
-                    _uiState.update { it.copy(artists = list, isLoading = false, errorMessage = null) }
-                }
-                .onFailure { err ->
-                    _uiState.update {
-                        it.copy(
-                            isLoading = false,
-                            errorMessage = err.message ?: "Gagal memuat daftar artis.",
-                        )
+        loadJob?.cancel()
+        loadJob = viewModelScope.launch {
+            if (query.isNotBlank()) delay(180L)
+            _uiState.update { it.copy(isLoading = it.artists.isEmpty(), errorMessage = null) }
+            if (artistRepository is StreamingArtistRepository) {
+                var received = false
+                runCatching {
+                    artistRepository.observeSuggestedArtists(query).collect { progressiveList ->
+                        received = true
+                        _uiState.update {
+                            it.copy(
+                                artists = progressiveList,
+                                isLoading = false,
+                                errorMessage = null,
+                            )
+                        }
+                    }
+                }.onFailure { err ->
+                    if (!received) {
+                        _uiState.update {
+                            it.copy(
+                                isLoading = false,
+                                errorMessage = err.message ?: "Gagal memuat daftar artis.",
+                            )
+                        }
                     }
                 }
+            } else {
+                artistRepository.getSuggestedArtists(query)
+                    .onSuccess { list ->
+                        _uiState.update { it.copy(artists = list, isLoading = false, errorMessage = null) }
+                    }
+                    .onFailure { err ->
+                        _uiState.update {
+                            it.copy(
+                                isLoading = false,
+                                errorMessage = err.message ?: "Gagal memuat daftar artis.",
+                            )
+                        }
+                    }
+            }
         }
     }
 
