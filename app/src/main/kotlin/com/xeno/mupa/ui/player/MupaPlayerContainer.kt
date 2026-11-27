@@ -98,6 +98,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.lerp
 import com.xeno.mupa.core.designsystem.component.MupaArtworkBox
 import com.xeno.mupa.core.designsystem.component.MupaGlassSurface
+import com.xeno.mupa.core.designsystem.component.UltraDynamicBackground
 import com.xeno.mupa.core.designsystem.theme.LocalMupaAppearance
 import com.xeno.mupa.core.designsystem.theme.MupaAppearance
 import com.xeno.mupa.core.designsystem.theme.MupaMotion
@@ -313,12 +314,10 @@ fun MupaPlayerOverlayHost(
                         )
                         .then(fullDragDownModifier),
                 ) {
-                    // Latar penuh sampul lagu yang di-blur (0 garis hitam!)
-                    FullBleedBlurredCoverBackdrop(
-                        artworkUrl = track.artworkUrl,
-                        topScrimAlpha = 0.34f,
-                        midScrimAlpha = 0.46f,
-                        bottomScrimAlpha = 0.80f,
+                    // Latar Ultra Dynamic native (3 radial gradient OKLab + grain, nol blur keruh!)
+                    UltraDynamicBackground(
+                        palette = appearance.effectiveUltraDynamicPalette,
+                        headerOnly = false,
                     )
 
                     FullNowPlayingContent(
@@ -425,6 +424,8 @@ fun MiniPlayerBar(
     isBuffering: Boolean = false,
 ) {
     val disp = remember(track, stripArtistName) { TrackDisplayRules.formatTrack(track, stripArtistName) }
+    val appearance = LocalMupaAppearance.current
+    val udPalette = appearance.effectiveUltraDynamicPalette
 
     MupaGlassSurface(
         shape = MupaRadii.MiniPlayer,
@@ -433,7 +434,29 @@ fun MiniPlayerBar(
             .semantics { contentDescription = "Mini player: ${disp.title}, ${disp.subtitle}. Ketuk untuk membuka pemutar penuh" }
             .clickable(onClick = onExpand),
     ) {
-        Box(modifier = Modifier.fillMaxSize()) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .drawBehind {
+                    if (appearance.shouldRenderUltraDynamic && udPalette.glowIntensity > 0.05f) {
+                        // Tint sudut tipis Ultra Dynamic di Mini Player (mengikuti HTML V15 L2135-2137)
+                        drawRect(
+                            brush = Brush.radialGradient(
+                                colors = listOf(udPalette.glow1.copy(alpha = 0.20f), Color.Transparent),
+                                center = Offset(size.width * 0.08f, 0f),
+                                radius = size.width * 0.65f,
+                            ),
+                        )
+                        drawRect(
+                            brush = Brush.radialGradient(
+                                colors = listOf(udPalette.glow2.copy(alpha = 0.14f), Color.Transparent),
+                                center = Offset(size.width * 0.94f, size.height),
+                                radius = size.width * 0.55f,
+                            ),
+                        )
+                    }
+                },
+        ) {
             Row(
                 modifier = Modifier
                     .fillMaxSize()

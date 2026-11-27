@@ -40,9 +40,14 @@ class MainActivity : ComponentActivity() {
 
             val resolvedAppearance = uiState.appearance.copy(
                 dynamicCoverAccent = if (playerState.currentTrack != null) {
-                    playerState.coverAccent
+                    playerState.ultraDynamicPalette.toDynamicCoverAccent()
                 } else {
                     uiState.appearance.dynamicCoverAccent
+                },
+                ultraDynamicPalette = if (playerState.currentTrack != null) {
+                    playerState.ultraDynamicPalette
+                } else {
+                    uiState.appearance.ultraDynamicPalette
                 },
             )
 

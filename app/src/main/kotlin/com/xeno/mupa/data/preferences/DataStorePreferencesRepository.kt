@@ -44,7 +44,7 @@ class DataStorePreferencesRepository @Inject constructor(
                 favoriteArtistIds = prefs[KEY_FAVORITE_ARTIST_IDS] ?: emptySet(),
                 glassStyle = glassStyle,
                 isOledMode = prefs[KEY_OLED_MODE] ?: false,
-                isAuroraEnabled = prefs[KEY_AURORA_ENABLED] ?: true,
+                isAuroraEnabled = prefs[KEY_ULTRA_DYNAMIC_ENABLED] ?: prefs[KEY_AURORA_ENABLED] ?: true,
                 isPerformanceMode = prefs[KEY_PERFORMANCE_MODE] ?: false,
                 stripArtistName = prefs[KEY_STRIP_ARTIST_NAME] ?: true,
                 activeSource = activeSource,
@@ -78,6 +78,7 @@ class DataStorePreferencesRepository @Inject constructor(
 
     override suspend fun setAuroraEnabled(enabled: Boolean) {
         dataStore.edit { prefs ->
+            prefs[KEY_ULTRA_DYNAMIC_ENABLED] = enabled
             prefs[KEY_AURORA_ENABLED] = enabled
         }
     }
@@ -106,6 +107,7 @@ class DataStorePreferencesRepository @Inject constructor(
         val KEY_GLASS_STYLE = stringPreferencesKey("glass_style")
         val KEY_OLED_MODE = booleanPreferencesKey("oled_mode")
         val KEY_AURORA_ENABLED = booleanPreferencesKey("aurora_enabled")
+        val KEY_ULTRA_DYNAMIC_ENABLED = booleanPreferencesKey("ultra_dynamic_enabled")
         val KEY_PERFORMANCE_MODE = booleanPreferencesKey("performance_mode")
         val KEY_STRIP_ARTIST_NAME = booleanPreferencesKey("strip_artist_name")
         val KEY_ACTIVE_SOURCE = stringPreferencesKey("active_source")

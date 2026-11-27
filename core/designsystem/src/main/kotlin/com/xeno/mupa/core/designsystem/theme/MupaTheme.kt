@@ -16,21 +16,35 @@ import dev.chrisbanes.haze.HazeState
 data class MupaAppearance(
     val glassStyle: GlassStyle = GlassStyle.SOLID,
     val isOledMode: Boolean = false,
-    val isAuroraEnabled: Boolean = true,
+    val isUltraDynamicEnabled: Boolean = true,
     val isPerformanceMode: Boolean = false,
     val dynamicCoverAccent: DynamicCoverAccent = DynamicCoverAccent.Default,
+    val ultraDynamicPalette: UltraDynamicPalette = UltraDynamicPalette.BrandNoCover,
 ) {
+    /** Alias kompatibilitas untuk pengujian lama; dipetakan ke isUltraDynamicEnabled. */
+    val isAuroraEnabled: Boolean get() = isUltraDynamicEnabled
+
+    val shouldRenderUltraDynamic: Boolean
+        get() = isUltraDynamicEnabled && !isOledMode
+
     val shouldRenderAurora: Boolean
-        get() = isAuroraEnabled && !isOledMode && !isPerformanceMode
+        get() = isUltraDynamicEnabled && !isOledMode && !isPerformanceMode
 
     val shouldUseBlurEffect: Boolean
         get() = glassStyle != GlassStyle.SOLID && !isOledMode && !isPerformanceMode
 
+    val effectiveUltraDynamicPalette: UltraDynamicPalette
+        get() = when {
+            isOledMode -> UltraDynamicPalette.OledBlack
+            !isUltraDynamicEnabled -> UltraDynamicPalette.BrandNoCover
+            else -> ultraDynamicPalette
+        }
+
     val effectiveCoverAccent: DynamicCoverAccent
-        get() = if (isOledMode || isPerformanceMode) {
+        get() = if (isOledMode || isPerformanceMode || !isUltraDynamicEnabled) {
             DynamicCoverAccent.Default
         } else {
-            dynamicCoverAccent
+            ultraDynamicPalette.toDynamicCoverAccent()
         }
 }
 

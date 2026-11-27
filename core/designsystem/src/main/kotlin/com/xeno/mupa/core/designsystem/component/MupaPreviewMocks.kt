@@ -18,6 +18,7 @@ import androidx.compose.ui.unit.dp
 import com.xeno.mupa.core.designsystem.theme.MupaAppearance
 import com.xeno.mupa.core.designsystem.theme.MupaRadii
 import com.xeno.mupa.core.designsystem.theme.MupaTheme
+import com.xeno.mupa.core.designsystem.theme.UltraDynamicPalette
 import com.xeno.mupa.core.model.GlassStyle
 
 @Preview(name = "Mupa Brand & Glass — Ember Editorial", showBackground = true)
@@ -27,7 +28,7 @@ private fun MupaDesignSystemPreview() {
         appearance = MupaAppearance(
             glassStyle = GlassStyle.LIQUID_PLUS,
             isOledMode = false,
-            isAuroraEnabled = true,
+            isUltraDynamicEnabled = true,
         ),
     ) {
         Box(
@@ -35,7 +36,7 @@ private fun MupaDesignSystemPreview() {
                 .background(MaterialTheme.colorScheme.background)
                 .fillMaxWidth(),
         ) {
-            MupaAuroraBackground()
+            UltraDynamicBackground(palette = UltraDynamicPalette.BrandNoCover, headerOnly = true)
             Column(
                 modifier = Modifier.padding(20.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp),
@@ -80,7 +81,7 @@ private fun MupaOledPreview() {
         appearance = MupaAppearance(
             glassStyle = GlassStyle.LIQUID_PLUS,
             isOledMode = true,
-            isAuroraEnabled = true,
+            isUltraDynamicEnabled = true,
         ),
     ) {
         Surface(color = MaterialTheme.colorScheme.background) {

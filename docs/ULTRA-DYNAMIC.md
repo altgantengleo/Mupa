@@ -61,3 +61,19 @@ Kami mengusulkan menggabungkan karakter visual **Ultra Dynamic HTML V15** dengan
 ### Pertanyaan Konfirmasi S0 untuk User
 1. Apakah spesifikasi **Ultra Dynamic** di atas (komposisi 3 radial gradient + grain dari HTML V15, memakai ekstraksi **OKLab k-means `k=5`** dengan token `bgDeep`/`glow1`/`glow2`/`onAccent`, fallback monokrom ke koral/amber Mupa, drift 48 dtk, crossfade 600 ms, tanpa blur bitmap yang bikin warna keruh) sudah cocok dengan Ultra Dynamic yang kamu maksud?
 2. Untuk cover **monokrom / hitam-putih**: di HTML V15 ia jatuh ke **abu-abu/perak netral**, sedangkan di spesifikasi Fase 2S A diminta jatuh ke **koral/amber merek Mupa** — kami set default mengikuti Fase 2S (**koral/amber Mupa**). Apakah sudah sesuai?
+
+
+---
+
+## 4. Perbandingan HTML V15 vs Native Mupa (Disetujui S0 → S1)
+
+| Aspek | HTML V15 (`music-x-V8_5.html`) | Padanan Native Mupa (`UltraDynamicEngine` + `UltraDynamicBackground`) | Status / Alasan Penyimpangan |
+|---|---|---|---|
+| **Sampling Cover** | Canvas 64×64, *center-crop* trim tepi 4%, bobot Gaussian tengah `0.60 + 0.70·exp(-7.5r²)`. | Identik: downscale 64×64, trim tepi 4%, bobot Gaussian tengah `0.60 + 0.70·exp(-7.5r²)`. | **Identik** |
+| **Clustering OKLab** | Histogram 3D 12×12×12 + weighted k-means (`K=12`, 12 iterasi), buang klaster `C < 0.032`. | Histogram 3D 12×12×12 + weighted k-means (`K=5`, 12 iterasi) di `Dispatchers.Default`, buang klaster `C < 0.04` / `L < 0.12` / `L > 0.95`, jarak hue min **≥ 25°**. | **Disetujui:** `K=5` + filter `C/L` + `hueGap ≥ 25°` tajam memisahkan 2–3 warna kontras (biru+pasir) & hemat CPU mobile. |
+| **Fallback Monokrom vs Tanpa Cover** | Monokrom → `buildNeutralDarkPalette()` (abu/perak netral). | **Monokrom/B&W → abu/perak netral (`MonochromeNeutral`, identik HTML V15).** **Tanpa cover sama sekali** (placeholder/loading/lokal tanpa artwork) → **koral/amber Mupa (`BrandNoCover`)**. | **Identik aturan user #2** |
+| **Jumlah & Posisi Blob** | 3 radial gradient (kiri-atas `11% 0%`, kanan-bawah `93% 100%`, tengah-atas `50% 34%`) + vignette + grain 160px. | 1 `Canvas` (`drawWithCache`) dengan 3 radial gradient identik (`11% 4%`, `92% 92%`, `50% 34%`) + vignette tepi + grain statis 3,6% (tile 64×64). **Nol blur bitmap/RenderEffect layar penuh.** | **Identik rasa visual**, tanpa blur mahal di GPU mobile. |
+| **Kecepatan Drift** | `themeAmbientDrift` 11 dtk, `auroraA`/`auroraB` 16–21 dtk, `mxDrift` 20 dtk (*ease-in-out alternate*). | 1 `rememberInfiniteTransition` **18 detik** (*EaseInOutSine Reverse*) dibaca hanya di fase draw, jeda otomatis saat lifecycle `< STARTED`, OLED, Performa, atau `animator_duration_scale = 0`. | **Mengikuti HTML V15 (16–21 dtk)**; 1 transisi agar hemat baterai. |
+| **Crossfade Ganti Lagu** | Crossfade opacity 340–420 ms tanpa loop JS berat. | Crossfade warna **600 ms** *tween* dibaca di fase draw (nol rekomposisi, nol overshoot). | **Halus & stabil di 60/120 Hz** |
+| **Pengaturan** | Toggle `Ultra Dynamic` + sub-toggle + 7 tier grafis. | **1 switch `Ultra Dynamic` (default ON)** menggantikan `Aurora Latar`, plus penghormatan otomatis ke **Mode OLED**, **Mode Performa**, dan **Reduced Motion**. | **Disederhanakan** sesuai aturan Mupa (tanpa 7 tier grafis rumit). |
+| **Cache** | LRU 80 lagu. | Thread-safe `LruCache` **64 lagu** per `trackId` di `Dispatchers.Default`. | **Hemat RAM mobile** |

@@ -48,7 +48,7 @@ class MupaDesignSystemTest {
 
         val oledAppearance = MupaAppearance(
             isOledMode = true,
-            isAuroraEnabled = true,
+            isUltraDynamicEnabled = true,
             isPerformanceMode = false,
             dynamicCoverAccent = customCover,
         )
@@ -59,7 +59,7 @@ class MupaDesignSystemTest {
 
         val perfAppearance = MupaAppearance(
             isOledMode = false,
-            isAuroraEnabled = true,
+            isUltraDynamicEnabled = true,
             isPerformanceMode = true,
             dynamicCoverAccent = customCover,
         )

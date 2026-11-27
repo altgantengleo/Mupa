@@ -19,7 +19,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.unit.dp
 import androidx.core.view.drawToBitmap
-import com.xeno.mupa.core.designsystem.component.MupaAuroraBackground
+import com.xeno.mupa.core.designsystem.component.UltraDynamicBackground
+import com.xeno.mupa.core.designsystem.theme.UltraDynamicPalette
 import com.xeno.mupa.core.designsystem.theme.MupaAppearance
 import com.xeno.mupa.core.designsystem.theme.MupaTheme
 import com.xeno.mupa.core.model.Artist
@@ -100,7 +101,7 @@ class BaselineScreenshotsTest {
             MupaTheme(appearance = MupaAppearance(glassStyle = GlassStyle.SOLID)) {
                 val bg = MaterialTheme.colorScheme.background
                 Box(Modifier.fillMaxSize().background(bg)) {
-                    MupaAuroraBackground()
+                    UltraDynamicBackground(palette = UltraDynamicPalette.BrandNoCover, headerOnly = true)
                     HomeScreen(
                         uiState = HomeUiState(
                             greeting = "Selamat sore",
@@ -160,7 +161,7 @@ class BaselineScreenshotsTest {
         composeRule.setContent {
             MupaTheme(appearance = MupaAppearance(glassStyle = GlassStyle.SOLID)) {
                 Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-                    MupaAuroraBackground()
+                    UltraDynamicBackground(palette = UltraDynamicPalette.BrandNoCover, headerOnly = true)
                     SearchScreen(
                         uiState = SearchUiState(
                             query = "yung",
@@ -191,7 +192,7 @@ class BaselineScreenshotsTest {
         composeRule.setContent {
             MupaTheme(appearance = MupaAppearance(glassStyle = GlassStyle.SOLID)) {
                 Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-                    MupaAuroraBackground()
+                    UltraDynamicBackground(palette = UltraDynamicPalette.BrandNoCover, headerOnly = true)
                     LibraryScreen(
                         uiState = LibraryUiState(
                             activeSource = AudioSourceType.LOCAL,
@@ -226,7 +227,7 @@ class BaselineScreenshotsTest {
         composeRule.setContent {
             MupaTheme(appearance = MupaAppearance(glassStyle = GlassStyle.SOLID)) {
                 Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-                    MupaAuroraBackground()
+                    UltraDynamicBackground(palette = UltraDynamicPalette.BrandNoCover, headerOnly = true)
                     LibraryScreen(
                         uiState = LibraryUiState(
                             activeSource = AudioSourceType.LOCAL,
@@ -261,7 +262,7 @@ class BaselineScreenshotsTest {
         composeRule.setContent {
             MupaTheme(appearance = MupaAppearance(glassStyle = GlassStyle.SOLID)) {
                 Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-                    MupaAuroraBackground()
+                    UltraDynamicBackground(palette = UltraDynamicPalette.BrandNoCover, headerOnly = true)
                     AccountScreen(
                         preferences = UserPreferences(),
                         favoriteArtists = listOf(Artist("1", "yung kai"), Artist("2", "Bruno Mars")),

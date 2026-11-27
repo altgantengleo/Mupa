@@ -197,11 +197,11 @@ fun AccountScreen(
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
                     MupaSettingRow(
-                        title = "Aurora Latar",
-                        subtitle = "Tint lembut dari sampul di bagian atas layar",
+                        title = "Ultra Dynamic",
+                        subtitle = "Warna latar & kilau mengikuti palet sampul lagu secara dinamis",
                         checked = preferences.isAuroraEnabled,
                         onCheckedChange = onAuroraEnabledChange,
-                        enabled = !preferences.isOledMode && !preferences.isPerformanceMode,
+                        enabled = !preferences.isOledMode,
                     )
                     HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 

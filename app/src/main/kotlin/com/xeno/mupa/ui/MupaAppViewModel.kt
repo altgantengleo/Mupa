@@ -35,7 +35,7 @@ data class MupaAppUiState(
         get() = MupaAppearance(
             glassStyle = preferences.glassStyle,
             isOledMode = preferences.isOledMode,
-            isAuroraEnabled = preferences.isAuroraEnabled,
+            isUltraDynamicEnabled = preferences.isAuroraEnabled,
             isPerformanceMode = preferences.isPerformanceMode,
             dynamicCoverAccent = DynamicCoverAccent.Default,
         )

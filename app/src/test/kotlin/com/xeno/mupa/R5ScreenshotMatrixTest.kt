@@ -22,7 +22,8 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.core.view.drawToBitmap
-import com.xeno.mupa.core.designsystem.component.MupaAuroraBackground
+import com.xeno.mupa.core.designsystem.component.UltraDynamicBackground
+import com.xeno.mupa.core.designsystem.theme.UltraDynamicPalette
 import com.xeno.mupa.core.designsystem.theme.MupaAppearance
 import com.xeno.mupa.core.designsystem.theme.MupaTheme
 import com.xeno.mupa.core.model.Artist
@@ -108,7 +109,7 @@ class R5ScreenshotMatrixTest {
             MupaTheme(appearance = MupaAppearance(glassStyle = GlassStyle.SOLID)) {
                 val bg = MaterialTheme.colorScheme.background
                 Box(Modifier.fillMaxSize().background(bg)) {
-                    MupaAuroraBackground()
+                    UltraDynamicBackground(palette = UltraDynamicPalette.BrandNoCover, headerOnly = true)
                     SearchScreen(
                         uiState = SearchUiState(
                             query = "a",
@@ -174,7 +175,7 @@ class R5ScreenshotMatrixTest {
         composeRule.setContent {
             MupaTheme(appearance = MupaAppearance(glassStyle = GlassStyle.SOLID)) {
                 Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-                    MupaAuroraBackground()
+                    UltraDynamicBackground(palette = UltraDynamicPalette.BrandNoCover, headerOnly = true)
                     SearchScreen(
                         uiState = SearchUiState(
                             query = "",
@@ -255,7 +256,7 @@ class R5ScreenshotMatrixTest {
         composeRule.setContent {
             MupaTheme(appearance = MupaAppearance(glassStyle = GlassStyle.SOLID)) {
                 Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-                    MupaAuroraBackground()
+                    UltraDynamicBackground(palette = UltraDynamicPalette.BrandNoCover, headerOnly = true)
                     LibraryScreen(
                         uiState = LibraryUiState(
                             activeSource = AudioSourceType.STREAMING,
@@ -299,7 +300,7 @@ class R5ScreenshotMatrixTest {
             CompositionLocalProvider(LocalDensity provides Density(base.density, fontScale = 1.3f)) {
                 MupaTheme(appearance = MupaAppearance(glassStyle = GlassStyle.SOLID)) {
                     Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
-                        MupaAuroraBackground()
+                        UltraDynamicBackground(palette = UltraDynamicPalette.BrandNoCover, headerOnly = true)
                         HomeScreen(
                             uiState = HomeUiState(
                                 greeting = "Selamat sore",
@@ -359,7 +360,7 @@ class R5ScreenshotMatrixTest {
             ),
         )
         composeRule.setContent {
-            MupaTheme(appearance = MupaAppearance(glassStyle = GlassStyle.SOLID, isOledMode = true, isAuroraEnabled = false)) {
+            MupaTheme(appearance = MupaAppearance(glassStyle = GlassStyle.SOLID, isOledMode = true, isUltraDynamicEnabled = false)) {
                 Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
                     HomeScreen(
                         uiState = HomeUiState(
@@ -386,7 +387,7 @@ class R5ScreenshotMatrixTest {
     fun captureNowPlaying411dpOled() {
         val track = tracks.first()
         composeRule.setContent {
-            MupaTheme(appearance = MupaAppearance(glassStyle = GlassStyle.SOLID, isOledMode = true, isAuroraEnabled = false)) {
+            MupaTheme(appearance = MupaAppearance(glassStyle = GlassStyle.SOLID, isOledMode = true, isUltraDynamicEnabled = false)) {
                 Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
                     FullNowPlayingContent(
                         track = track,
@@ -430,7 +431,7 @@ class R5ScreenshotMatrixTest {
     fun captureCinemaOled360dp() {
         val track = tracks.first()
         composeRule.setContent {
-            MupaTheme(appearance = MupaAppearance(glassStyle = GlassStyle.SOLID, isOledMode = true, isAuroraEnabled = false)) {
+            MupaTheme(appearance = MupaAppearance(glassStyle = GlassStyle.SOLID, isOledMode = true, isUltraDynamicEnabled = false)) {
                 MupaCinemaOverlay(
                     track = track,
                     stripArtistName = true,

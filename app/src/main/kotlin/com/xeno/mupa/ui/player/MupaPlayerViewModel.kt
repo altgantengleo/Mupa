@@ -11,9 +11,16 @@ import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.session.MediaController
 import androidx.media3.session.SessionToken
+import coil3.SingletonImageLoader
+import coil3.request.ImageRequest
+import coil3.request.allowHardware
+import coil3.toBitmap
 import com.google.common.util.concurrent.ListenableFuture
+import com.xeno.mupa.core.designsystem.theme.UltraDynamicPalette
+import com.xeno.mupa.core.designsystem.theme.UltraDynamicPaletteCache
 import com.xeno.mupa.core.model.AudioSourceType
 import com.xeno.mupa.core.model.Track
+import java.io.File
 import com.xeno.mupa.data.local.LocalLibraryRepository
 import com.xeno.mupa.data.lyrics.LyricsRepository
 import com.xeno.mupa.data.lyrics.LyricsRequest
@@ -56,6 +63,7 @@ class MupaPlayerViewModel @Inject constructor(
     private var pendingCommand: ((MediaController) -> Unit)? = null
     private var positionSyncJob: Job? = null
     private var lyricsFetchJob: Job? = null
+    private var udExtractJob: Job? = null
 
     @Volatile
     private var isCleared: Boolean = false
@@ -111,6 +119,7 @@ class MupaPlayerViewModel @Inject constructor(
                     viewModelScope.launch { localLibraryRepository.recordPlay(track.id) }
                 }
                 persistCurrentQueue()
+                extractUltraDynamicForTrack(track)
                 fetchLyricsForCurrentTrack()
             }
         }
@@ -330,7 +339,8 @@ class MupaPlayerViewModel @Inject constructor(
             ctrl.prepare()
             ctrl.play()
         }
-        // Pre-fetch lirik proaktif di latar belakang agar langsung siap saat buka Lirik/Cinema
+        // Pre-fetch lirik & ekstraksi palet Ultra Dynamic di latar belakang
+        extractUltraDynamicForTrack(track)
         fetchLyricsForCurrentTrack()
     }
 
@@ -423,6 +433,7 @@ class MupaPlayerViewModel @Inject constructor(
             if (autoPlay) ctrl.play() else ctrl.pause()
         }
         persistCurrentQueue()
+        extractUltraDynamicForTrack(track)
     }
 
     fun toggleShuffle() {
@@ -667,11 +678,41 @@ class MupaPlayerViewModel @Inject constructor(
         positionSyncJob = null
     }
 
+    private fun extractUltraDynamicForTrack(track: Track) {
+        val art = track.artworkUrl
+        if (art.isNullOrBlank()) {
+            _uiState.update { it.copy(ultraDynamicPalette = UltraDynamicPalette.BrandNoCover) }
+            return
+        }
+        UltraDynamicPaletteCache.get(track.id)?.let { cached ->
+            _uiState.update { it.copy(ultraDynamicPalette = cached) }
+            return
+        }
+        udExtractJob?.cancel()
+        udExtractJob = viewModelScope.launch(Dispatchers.IO) {
+            val model: Any = if (art.startsWith("/")) File(art) else art
+            val bmp = runCatching {
+                val loader = SingletonImageLoader.get(appContext)
+                val req = ImageRequest.Builder(appContext)
+                    .data(model)
+                    .size(128)
+                    .allowHardware(false)
+                    .build()
+                loader.execute(req).image?.toBitmap()
+            }.getOrNull()
+            val palette = UltraDynamicPaletteCache.extractOrGet(track.id, bmp)
+            if (_uiState.value.currentTrack?.id == track.id) {
+                _uiState.update { it.copy(ultraDynamicPalette = palette) }
+            }
+        }
+    }
+
     override fun onCleared() {
         isCleared = true
         pendingCommand = null
         stopPositionSync()
         lyricsFetchJob?.cancel()
+        udExtractJob?.cancel()
         mediaController?.removeListener(playerListener)
         controllerFuture?.let { MediaController.releaseFuture(it) }
         mediaController = null

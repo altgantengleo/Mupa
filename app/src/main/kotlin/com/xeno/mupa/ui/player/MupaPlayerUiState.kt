@@ -3,6 +3,7 @@ package com.xeno.mupa.ui.player
 import androidx.compose.runtime.Immutable
 import androidx.compose.ui.graphics.Color
 import com.xeno.mupa.core.designsystem.theme.DynamicCoverAccent
+import com.xeno.mupa.core.designsystem.theme.UltraDynamicPalette
 import com.xeno.mupa.core.model.LyricsLine
 import com.xeno.mupa.core.model.Track
 import com.xeno.mupa.playback.eq.EqPreset
@@ -46,6 +47,7 @@ data class MupaPlayerUiState(
     val sleepTimerMinutes: Int? = null,
     val isBuffering: Boolean = false,
     val errorMessage: String? = null,
+    val ultraDynamicPalette: UltraDynamicPalette = UltraDynamicPalette.BrandNoCover,
 ) {
     val progressFraction: Float
         get() = if (durationMs > 0L) {
