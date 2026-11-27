@@ -91,10 +91,13 @@ fun MupaArtworkBox(
     size: Dp,
     shape: Shape = MupaRadii.ArtworkSmall,
     iconSize: Dp = (size * 0.40f).coerceIn(18.dp, 48.dp),
+    memoryCacheKey: String? = null,
+    enableCrossfade: Boolean = true,
+    decodeSizePxOverride: Int? = null,
     modifier: Modifier = Modifier,
 ) {
     val context = LocalContext.current
-    val decodePx = with(LocalDensity.current) { size.roundToPx().coerceIn(96, 768) }
+    val decodePx = decodeSizePxOverride ?: with(LocalDensity.current) { size.roundToPx().coerceIn(96, 768) }
 
     Box(
         modifier = modifier
@@ -116,7 +119,13 @@ fun MupaArtworkBox(
                 model = ImageRequest.Builder(context)
                     .data(dataModel)
                     .size(decodePx)
-                    .crossfade(160)
+                    .apply {
+                        if (!memoryCacheKey.isNullOrBlank()) {
+                            memoryCacheKey(memoryCacheKey)
+                            placeholderMemoryCacheKey(memoryCacheKey)
+                        }
+                        if (enableCrossfade) crossfade(160) else crossfade(false)
+                    }
                     .build(),
                 contentDescription = contentDescription,
                 contentScale = ContentScale.Crop,

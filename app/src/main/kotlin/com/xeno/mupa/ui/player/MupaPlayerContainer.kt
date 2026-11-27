@@ -1,7 +1,6 @@
 package com.xeno.mupa.ui.player
 
 import androidx.activity.compose.BackHandler
-import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.animateFloatAsState
@@ -9,9 +8,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
-import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -26,12 +23,16 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
@@ -53,15 +54,12 @@ import androidx.compose.material.icons.rounded.Shuffle
 import androidx.compose.material.icons.rounded.SkipNext
 import androidx.compose.material.icons.rounded.SkipPrevious
 import androidx.compose.material.icons.rounded.Timer
-import androidx.compose.material3.Badge
-import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -83,19 +81,24 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.input.pointer.positionChange
 import androidx.compose.ui.input.pointer.util.VelocityTracker
+import androidx.compose.ui.layout.boundsInParent
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.lerp
+import androidx.compose.ui.unit.sp
 import com.xeno.mupa.core.designsystem.component.MupaArtworkBox
 import com.xeno.mupa.core.designsystem.component.MupaGlassSurface
 import com.xeno.mupa.core.designsystem.component.UltraDynamicBackground
@@ -113,15 +116,13 @@ import java.util.Locale
 import kotlin.math.roundToInt
 
 /**
- * Container terpadu Mini Player -> Full Now Playing -> Cinema (perbaikan B6 & B11).
- *
- * Anti-kedip (menghindari 6 sumber kedip di docs/AUDIT.md):
- * 1. Backdrop solid sinkron sejak frame 0 (penuh di p=0.18 sebelum mini memudar di p=0.25).
- * 2. Nol CompositingStrategy.Offscreen layar penuh pada konten belakang.
- * 3. Komponen utama tetap terkomposisi stabil; visibilitas/posisi dibaca di fase layout/draw saja.
- * 4. MupaPlayerSheetState tidak di-recreate saat WindowInsets berubah.
- * 5. Drag 1:1 memakai CoroutineStart.UNDISPATCHED pada koordinat STASIONER (tanpa loop koordinat translationY).
- * 6. Default Solid tanpa fallback blur asinkron kosong.
+ * Container terpadu Mini Player <-> Full Now Playing <-> Cinema (Fase 2S — S2):
+ * - SATU composable cover (MupaArtworkBox dengan crossfade=false & shared memoryCacheKey) yang
+ *   posisi, ukuran (44dp -> lebar-48dp), radius (12dp -> 28dp), dan bayangannya di-lerp simetris
+ *   oleh satu progres 0..1 (buka 520 ms, tutup 440 ms, cubic-bezier(0.2, 0, 0, 1)).
+ * - Koreografi progres: isi mini memudar 0-25%; cover 0-100%; latar UD 0-70% (edge-to-edge + scrim status bar);
+ *   header/judul/seekbar/kontrol masuk 35-100% bertahap (fade + 16dp slide).
+ * - Saat Mini ciut (p == 0), NOL pointerInput/touch-blocker layar penuh -> scroll layar belakang 100% bebas.
  */
 @Composable
 fun MupaPlayerOverlayHost(
@@ -157,6 +158,7 @@ fun MupaPlayerOverlayHost(
     val track = playerState.currentTrack ?: return
     val appearance = LocalMupaAppearance.current
     val density = LocalDensity.current
+    val statusBarTopDp = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
 
     // Back bertahap: Cinema -> Overlay (Queue/EQ/Lyrics) -> Full -> Mini
     BackHandler(enabled = playerState.isCinemaMode || sheetState.isExpanded) {
@@ -184,13 +186,32 @@ fun MupaPlayerOverlayHost(
 
     BoxWithConstraints(modifier = modifier.fillMaxSize()) {
         val containerMaxWidth = maxWidth
+        val fullWidthPx = with(density) { maxWidth.toPx() }.coerceAtLeast(1f)
         val fullHeightPx = with(density) { maxHeight.toPx() }.coerceAtLeast(1f)
-        sheetState.travelDistancePx = fullHeightPx
+        val miniHeightPx = with(density) { MupaPlayerSheetState.MiniPlayerHeight.toPx() }
+        val bottomClearancePx = with(density) { bottomBarClearance.toPx() }
+        val statusTopPx = with(density) { statusBarTopDp.toPx() }
+        sheetState.travelDistancePx = (fullHeightPx - bottomClearancePx - miniHeightPx).coerceAtLeast(1f)
 
         val progressProvider = remember(sheetState) { { sheetState.progress } }
-        val showFullSheet = sheetState.isVisible || playerState.isCinemaMode
+        val showFullLayer = sheetState.isVisible || playerState.isCinemaMode
+        val showInlineLyrics = playerState.activeOverlay == PlayerOverlayPane.LYRICS
 
-        // Drag-up HANYA di MiniPlayerBar (64dp) -> 0% blokir scroll layar belakang!
+        // Koordinat slot cover mini & full (diukur langsung agar 0.0px jump pada layar apa pun!)
+        val miniCoverSizeDp = 44.dp
+        val fullCoverSizeDp = (containerMaxWidth - 48.dp).coerceIn(220.dp, 340.dp)
+        val defaultMiniX = with(density) { (20.dp + 10.dp).toPx() }
+        val defaultMiniY = (fullHeightPx - bottomClearancePx - miniHeightPx + with(density) { 10.dp.toPx() }).coerceAtLeast(0f)
+        val defaultFullX = ((fullWidthPx - with(density) { fullCoverSizeDp.toPx() }) / 2f).coerceAtLeast(0f)
+        val defaultFullY = statusTopPx + with(density) { 104.dp.toPx() }
+
+        var hostOriginX by remember { mutableFloatStateOf(0f) }
+        var hostOriginY by remember { mutableFloatStateOf(0f) }
+        var measuredMiniX by remember { mutableFloatStateOf(Float.NaN) }
+        var measuredMiniY by remember { mutableFloatStateOf(Float.NaN) }
+        var measuredFullX by remember { mutableFloatStateOf(Float.NaN) }
+        var measuredFullY by remember { mutableFloatStateOf(Float.NaN) }
+
         val miniDragUpModifier = Modifier.pointerInput(sheetState, fullHeightPx) {
             val velocityTracker = VelocityTracker()
             awaitEachGesture {
@@ -223,7 +244,6 @@ fun MupaPlayerOverlayHost(
             }
         }
 
-        // Drag-down 1:1 di Full Now Playing (koordinat layar = sheetTop + localY, 0 feedback loop!)
         val fullDragDownModifier = Modifier.pointerInput(sheetState, fullHeightPx, sheetOverlayVisible, playerState.isCinemaMode) {
             val velocityTracker = VelocityTracker()
             awaitEachGesture {
@@ -231,17 +251,16 @@ fun MupaPlayerOverlayHost(
                 if (sheetState.progress < 0.2f || playerState.isCinemaMode || sheetOverlayVisible) {
                     return@awaitEachGesture
                 }
-                var lastScreenY = fullHeightPx * (1f - sheetState.progress) + down.position.y
+                var lastY = down.position.y
                 velocityTracker.resetTracking()
-                velocityTracker.addPosition(down.uptimeMillis, Offset(down.position.x, lastScreenY))
+                velocityTracker.addPosition(down.uptimeMillis, down.position)
                 var dragStarted = false
                 val dragChange = awaitVerticalTouchSlopOrCancellation(down.id) { change, over ->
                     if (over > 0f) {
                         change.consume()
                         dragStarted = true
-                        val curScreenY = fullHeightPx * (1f - sheetState.progress) + change.position.y
-                        val dy = curScreenY - lastScreenY
-                        lastScreenY = curScreenY
+                        val dy = change.position.y - lastY
+                        lastY = change.position.y
                         sheetState.onDragStart()
                         sheetState.onDragDelta(dy)
                     }
@@ -249,10 +268,9 @@ fun MupaPlayerOverlayHost(
                 if (dragChange != null && dragStarted) {
                     verticalDrag(dragChange.id) { change ->
                         change.consume()
-                        val curScreenY = fullHeightPx * (1f - sheetState.progress) + change.position.y
-                        val dy = curScreenY - lastScreenY
-                        lastScreenY = curScreenY
-                        velocityTracker.addPosition(change.uptimeMillis, Offset(change.position.x, curScreenY))
+                        val dy = change.position.y - lastY
+                        lastY = change.position.y
+                        velocityTracker.addPosition(change.uptimeMillis, change.position)
                         sheetState.onDragDelta(dy)
                     }
                     sheetState.onDragEnd(velocityTracker.calculateVelocity().y)
@@ -263,14 +281,54 @@ fun MupaPlayerOverlayHost(
         Box(
             modifier = Modifier
                 .fillMaxSize()
-                .drawBehind {
-                    val p = progressProvider()
-                    if (p > 0.005f) {
-                        drawRect(Color.Black.copy(alpha = (0.55f * p).coerceIn(0f, 0.55f)))
-                    }
+                .onGloballyPositioned { coords ->
+                    val pos = coords.positionInRoot()
+                    hostOriginX = pos.x
+                    hostOriginY = pos.y
                 },
         ) {
-            // 1. Mini Player tersemat rapi di atas Bottom Nav (tidak ikut loncat, hanya memudar halus saat Full naik)
+            // 1. Latar Ultra Dynamic Full Now Playing (muncul mulus 0..70%, edge-to-edge sampai tepi atas + scrim status bar!)
+            if (showFullLayer) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            alpha = MupaPlayerMorphMath.udBackdropAlpha(progressProvider())
+                        }
+                        // Touch blocker non-semantik agar layar belakang tidak tersentuh saat Full terbuka
+                        .pointerInput(Unit) {
+                            awaitPointerEventScope {
+                                while (true) {
+                                    awaitPointerEvent()
+                                }
+                            }
+                        }
+                        .then(fullDragDownModifier),
+                ) {
+                    UltraDynamicBackground(
+                        palette = appearance.effectiveUltraDynamicPalette,
+                        headerOnly = false,
+                    )
+
+                    // Scrim halus di bawah status bar agar ikon jam/baterai selalu terbaca (perbaikan N1)
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopCenter)
+                            .fillMaxWidth()
+                            .height(statusBarTopDp + 36.dp)
+                            .background(
+                                Brush.verticalGradient(
+                                    colors = listOf(
+                                        Color.Black.copy(alpha = 0.42f),
+                                        Color.Transparent,
+                                    ),
+                                ),
+                            ),
+                    )
+                }
+            }
+
+            // 2. Mini Player (hanya area 64dp; isi memudar 0..25%; artwork dirender oleh SATU composable morphing cover!)
             if (!sheetState.isSettledExpanded) {
                 MiniPlayerBar(
                     track = track,
@@ -278,6 +336,11 @@ fun MupaPlayerOverlayHost(
                     isPlaying = playerState.isPlaying,
                     isBuffering = playerState.isBuffering,
                     progressFraction = playerState.progressFraction,
+                    showArtwork = false,
+                    onArtworkSlotPositioned = { rootX, rootY ->
+                        measuredMiniX = rootX - hostOriginX
+                        measuredMiniY = rootY - hostOriginY
+                    },
                     onExpand = { sheetState.expand() },
                     onTogglePlayPause = onTogglePlayPause,
                     onSkipNext = onSkipNext,
@@ -288,102 +351,155 @@ fun MupaPlayerOverlayHost(
                         .height(MupaPlayerSheetState.MiniPlayerHeight)
                         .then(miniDragUpModifier)
                         .graphicsLayer {
-                            val p = progressProvider()
-                            alpha = (1f - p * 3.2f).coerceIn(0f, 1f)
-                            translationY = 18.dp.toPx() * p
+                            alpha = MupaPlayerMorphMath.miniContentAlpha(progressProvider())
                         },
                 )
             }
 
-            // 2. Full Now Playing Sheet (full-bleed edge-to-edge meluncur mulus dari bawah -> 0 jump!)
-            if (showFullSheet) {
-                Box(
+            // 3. Full Now Playing Content (elemen masuk bertahap 35..100% fade + geser 16dp, simetris saat tutup!)
+            if (showFullLayer) {
+                FullNowPlayingContent(
+                    track = track,
+                    stripArtistName = stripArtistName,
+                    playerState = playerState,
+                    progressProvider = progressProvider,
+                    positionProvider = positionProvider,
+                    maxWidthDp = containerMaxWidth,
+                    renderEmbeddedCover = false,
+                    onCoverSlotPositioned = { rootX, rootY ->
+                        measuredFullX = rootX - hostOriginX
+                        measuredFullY = rootY - hostOriginY
+                    },
+                    onCollapse = { sheetState.collapse() },
+                    onTogglePlayPause = onTogglePlayPause,
+                    onSeekTo = onSeekTo,
+                    onSkipNext = onSkipNext,
+                    onSkipPrevious = onSkipPrevious,
+                    onToggleShuffle = onToggleShuffle,
+                    onCycleRepeat = onCycleRepeat,
+                    onToggleFavorite = onToggleFavorite,
+                    onToggleLyrics = { onOpenOverlay(PlayerOverlayPane.LYRICS) },
+                    onRetryLyrics = onRetryLyrics,
+                    onOpenQueue = { onOpenOverlay(PlayerOverlayPane.QUEUE) },
+                    onOpenEqualizer = { onOpenOverlay(PlayerOverlayPane.EQUALIZER) },
+                    onOpenCinema = onOpenCinema,
+                    onAdjustLyricsOffset = onAdjustLyricsOffset,
+                    onResetLyricsOffset = onResetLyricsOffset,
+                    onCycleSleepTimer = onCycleSleepTimer,
                     modifier = Modifier
                         .fillMaxSize()
+                        .then(fullDragDownModifier),
+                )
+            }
+
+            // 4. SATU COMPOSABLE COVER MORPHING (0..100% posisi, ukuran, radius 12dp->28dp, & bayangan naik simetris!)
+            val coverLyricsAlpha by animateFloatAsState(
+                targetValue = if (showInlineLyrics && sheetState.isExpanded) 0f else 1f,
+                animationSpec = MupaMotion.standardTween(220),
+                label = "singleCoverLyricsFade",
+            )
+            val coverPlayBreath by animateFloatAsState(
+                targetValue = if (playerState.isPlaying || !sheetState.isExpanded) 1f else 0.95f,
+                animationSpec = MupaMotion.emphasizedTween(280),
+                label = "singleCoverBreath",
+            )
+            if (!playerState.isCinemaMode && !sheetOverlayVisible) {
+                Box(
+                    modifier = Modifier
+                        .testTag("mupa_morphing_cover")
+                        .layout { measurable, _ ->
+                            val m = MupaPlayerMorphMath.coverMorphFraction(progressProvider())
+                            val sizeDp = lerp(miniCoverSizeDp, fullCoverSizeDp, m)
+                            val sizePx = sizeDp.roundToPx().coerceAtLeast(1)
+                            val placeable = measurable.measure(Constraints.fixed(sizePx, sizePx))
+
+                            val sx = if (!measuredMiniX.isNaN()) measuredMiniX else defaultMiniX
+                            val sy = if (!measuredMiniY.isNaN()) measuredMiniY else defaultMiniY
+                            val ex = if (!measuredFullX.isNaN()) measuredFullX else defaultFullX
+                            val ey = if (!measuredFullY.isNaN()) measuredFullY else defaultFullY
+
+                            val x = (sx + (ex - sx) * m).roundToInt()
+                            val y = (sy + (ey - sy) * m).roundToInt()
+                            layout(0, 0) {
+                                placeable.placeRelative(x, y)
+                            }
+                        }
                         .graphicsLayer {
-                            val p = progressProvider()
-                            translationY = fullHeightPx * (1f - p)
-                            val cornerPx = (28.dp.toPx() * (1f - p)).coerceAtLeast(0f)
-                            shape = RoundedCornerShape(topStart = cornerPx, topEnd = cornerPx)
-                            clip = cornerPx > 0.5f
+                            val m = MupaPlayerMorphMath.coverMorphFraction(progressProvider())
+                            val cornerPx = lerp(12.dp, 28.dp, m).toPx()
+                            val elevationPx = (24.dp * MupaPlayerMorphMath.coverShadowFraction(m)).toPx()
+                            shadowElevation = elevationPx
+                            ambientShadowColor = Color.Black.copy(alpha = 0.65f)
+                            spotShadowColor = Color.Black.copy(alpha = 0.72f)
+                            shape = RoundedCornerShape(cornerPx)
+                            clip = true
+                            alpha = coverLyricsAlpha
+                            val breathScale = 1f + (coverPlayBreath - 1f) * m
+                            scaleX = breathScale
+                            scaleY = breathScale
                         }
                         .clickable(
+                            enabled = coverLyricsAlpha > 0.5f,
                             interactionSource = remember { MutableInteractionSource() },
                             indication = null,
-                            onClick = {},
-                        )
-                        .then(fullDragDownModifier),
+                        ) {
+                            if (sheetState.isExpanded) {
+                                onOpenOverlay(PlayerOverlayPane.LYRICS)
+                            } else {
+                                sheetState.expand()
+                            }
+                        },
                 ) {
-                    // Latar Ultra Dynamic native (3 radial gradient OKLab + grain, nol blur keruh!)
-                    UltraDynamicBackground(
-                        palette = appearance.effectiveUltraDynamicPalette,
-                        headerOnly = false,
-                    )
-
-                    FullNowPlayingContent(
-                        track = track,
-                        stripArtistName = stripArtistName,
-                        playerState = playerState,
-                        progressProvider = progressProvider,
-                        positionProvider = positionProvider,
-                        maxWidthDp = containerMaxWidth,
-                        onCollapse = { sheetState.collapse() },
-                        onTogglePlayPause = onTogglePlayPause,
-                        onSeekTo = onSeekTo,
-                        onSkipNext = onSkipNext,
-                        onSkipPrevious = onSkipPrevious,
-                        onToggleShuffle = onToggleShuffle,
-                        onCycleRepeat = onCycleRepeat,
-                        onToggleFavorite = onToggleFavorite,
-                        onToggleLyrics = { onOpenOverlay(PlayerOverlayPane.LYRICS) },
-                        onRetryLyrics = onRetryLyrics,
-                        onOpenQueue = { onOpenOverlay(PlayerOverlayPane.QUEUE) },
-                        onOpenEqualizer = { onOpenOverlay(PlayerOverlayPane.EQUALIZER) },
-                        onOpenCinema = onOpenCinema,
-                        onAdjustLyricsOffset = onAdjustLyricsOffset,
-                        onResetLyricsOffset = onResetLyricsOffset,
-                        onCycleSleepTimer = onCycleSleepTimer,
+                    MupaArtworkBox(
+                        artworkUrl = track.artworkUrl,
+                        contentDescription = track.title,
+                        size = fullCoverSizeDp,
+                        shape = RoundedCornerShape(0.dp),
+                        iconSize = 52.dp,
+                        memoryCacheKey = "mupa_cover_${track.id}",
+                        enableCrossfade = false,
+                        decodeSizePxOverride = 768,
                         modifier = Modifier.fillMaxSize(),
                     )
-
-                    // Sheet Antrean & Equalizer
-                    AnimatedVisibility(
-                        visible = sheetOverlayVisible && sheetState.isExpanded,
-                        enter = slideInVertically(
-                            animationSpec = MupaMotion.emphasizedTween(MupaMotion.DurationSheetMs),
-                            initialOffsetY = { it / 6 },
-                        ) + fadeIn(MupaMotion.standardTween(MupaMotion.DurationShortMs)),
-                        exit = slideOutVertically(
-                            animationSpec = MupaMotion.emphasizedTween(MupaMotion.DurationShortMs),
-                            targetOffsetY = { it / 8 },
-                        ) + fadeOut(MupaMotion.standardTween(MupaMotion.DurationShortMs)),
-                    ) {
-                        when (renderedSheetOverlay) {
-                            PlayerOverlayPane.QUEUE -> MupaQueueOverlay(
-                                queue = playerState.queue,
-                                currentIndex = playerState.currentIndex,
-                                stripArtistName = stripArtistName,
-                                onSelectIndex = onSelectQueueIndex,
-                                onMoveItem = onMoveQueueItem,
-                                onRemoveItem = onRemoveQueueItem,
-                                onClearUpcoming = onClearUpcomingQueue,
-                                onClose = onCloseOverlay,
-                            )
-                            PlayerOverlayPane.EQUALIZER -> MupaEqualizerOverlay(
-                                activePreset = playerState.eqPreset,
-                                bandGainsDb = playerState.eqGainsDb,
-                                onSelectPreset = onSelectEqPreset,
-                                onBandGainChange = onEqBandChange,
-                                onReset = onResetEq,
-                                onClose = onCloseOverlay,
-                            )
-                            else -> Unit
-                        }
-                    }
                 }
             }
 
-            // 3. Mode Cinema Layar Penuh (full-bleed blurred cover, transisi fade halus tanpa lompatan)
+            // 5. Sheet Antrean & Equalizer (2-frame pre-mount warm-up, Emphasized Decelerate)
+            AnimatedVisibility(
+                visible = sheetOverlayVisible && sheetState.isExpanded,
+                enter = slideInVertically(
+                    animationSpec = MupaMotion.emphasizedTween(MupaMotion.DurationSheetMs),
+                    initialOffsetY = { it / 6 },
+                ) + fadeIn(MupaMotion.standardTween(MupaMotion.DurationShortMs)),
+                exit = slideOutVertically(
+                    animationSpec = MupaMotion.emphasizedTween(MupaMotion.DurationShortMs),
+                    targetOffsetY = { it / 8 },
+                ) + fadeOut(MupaMotion.standardTween(MupaMotion.DurationShortMs)),
+            ) {
+                when (renderedSheetOverlay) {
+                    PlayerOverlayPane.QUEUE -> MupaQueueOverlay(
+                        queue = playerState.queue,
+                        currentIndex = playerState.currentIndex,
+                        stripArtistName = stripArtistName,
+                        onSelectIndex = onSelectQueueIndex,
+                        onMoveItem = onMoveQueueItem,
+                        onRemoveItem = onRemoveQueueItem,
+                        onClearUpcoming = onClearUpcomingQueue,
+                        onClose = onCloseOverlay,
+                    )
+                    PlayerOverlayPane.EQUALIZER -> MupaEqualizerOverlay(
+                        activePreset = playerState.eqPreset,
+                        bandGainsDb = playerState.eqGainsDb,
+                        onSelectPreset = onSelectEqPreset,
+                        onBandGainChange = onEqBandChange,
+                        onReset = onResetEq,
+                        onClose = onCloseOverlay,
+                    )
+                    else -> Unit
+                }
+            }
+
+            // 6. Mode Cinema Layar Penuh
             AnimatedVisibility(
                 visible = playerState.isCinemaMode,
                 enter = fadeIn(MupaMotion.emphasizedTween(280)),
@@ -406,10 +522,7 @@ fun MupaPlayerOverlayHost(
 }
 
 /**
- * Mini Player Mupa Calm (perbaikan B1, B6, B11):
- * - Permukaan solid 64dp radius 20dp + hairline 1dp.
- * - Tombol Play/Pause koral 40dp berikon #16161A (proporsional, tidak mendominasi).
- * - Progres tipis 2dp di dasar mini player.
+ * Mini Player Mupa Calm dengan tint Ultra Dynamic tipis di sudut & progres 2dp.
  */
 @Composable
 fun MiniPlayerBar(
@@ -422,6 +535,8 @@ fun MiniPlayerBar(
     modifier: Modifier = Modifier,
     stripArtistName: Boolean = true,
     isBuffering: Boolean = false,
+    showArtwork: Boolean = true,
+    onArtworkSlotPositioned: ((Float, Float) -> Unit)? = null,
 ) {
     val disp = remember(track, stripArtistName) { TrackDisplayRules.formatTrack(track, stripArtistName) }
     val appearance = LocalMupaAppearance.current
@@ -439,17 +554,16 @@ fun MiniPlayerBar(
                 .fillMaxSize()
                 .drawBehind {
                     if (appearance.shouldRenderUltraDynamic && udPalette.glowIntensity > 0.05f) {
-                        // Tint sudut tipis Ultra Dynamic di Mini Player (mengikuti HTML V15 L2135-2137)
                         drawRect(
                             brush = Brush.radialGradient(
-                                colors = listOf(udPalette.glow1.copy(alpha = 0.20f), Color.Transparent),
+                                colors = listOf(udPalette.glow1.copy(alpha = 0.22f), Color.Transparent),
                                 center = Offset(size.width * 0.08f, 0f),
                                 radius = size.width * 0.65f,
                             ),
                         )
                         drawRect(
                             brush = Brush.radialGradient(
-                                colors = listOf(udPalette.glow2.copy(alpha = 0.14f), Color.Transparent),
+                                colors = listOf(udPalette.glow2.copy(alpha = 0.15f), Color.Transparent),
                                 center = Offset(size.width * 0.94f, size.height),
                                 radius = size.width * 0.55f,
                             ),
@@ -464,13 +578,26 @@ fun MiniPlayerBar(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                MupaArtworkBox(
-                    artworkUrl = track.artworkUrl,
-                    contentDescription = disp.title,
-                    size = 44.dp,
-                    shape = MupaRadii.ArtworkSmall,
-                    iconSize = 20.dp,
-                )
+                Box(
+                    modifier = Modifier
+                        .size(44.dp)
+                        .onGloballyPositioned { coords ->
+                            val pos = coords.positionInRoot()
+                            onArtworkSlotPositioned?.invoke(pos.x, pos.y)
+                        },
+                ) {
+                    if (showArtwork) {
+                        MupaArtworkBox(
+                            artworkUrl = track.artworkUrl,
+                            contentDescription = disp.title,
+                            size = 44.dp,
+                            shape = MupaRadii.ArtworkSmall,
+                            iconSize = 20.dp,
+                            memoryCacheKey = "mupa_cover_${track.id}",
+                            enableCrossfade = false,
+                        )
+                    }
+                }
 
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
@@ -489,7 +616,6 @@ fun MiniPlayerBar(
                     )
                 }
 
-                // Tombol Play/Pause 40dp koral berikon gelap (perbaikan B6)
                 Box(
                     modifier = Modifier
                         .size(40.dp)
@@ -527,7 +653,6 @@ fun MiniPlayerBar(
                 }
             }
 
-            // Garis progres 2dp di dasar Mini Player
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomStart)
@@ -571,11 +696,13 @@ internal fun FullNowPlayingContent(
     onResetLyricsOffset: () -> Unit,
     onCycleSleepTimer: () -> Unit,
     modifier: Modifier = Modifier,
+    renderEmbeddedCover: Boolean = true,
+    onCoverSlotPositioned: ((Float, Float) -> Unit)? = null,
 ) {
-    val appearance = LocalMupaAppearance.current
     val disp = remember(track, stripArtistName) { TrackDisplayRules.formatTrack(track, stripArtistName) }
     val showInlineLyrics = playerState.activeOverlay == PlayerOverlayPane.LYRICS
     var topMenuOpen by remember { mutableStateOf(false) }
+    val coverSize = (maxWidthDp - 48.dp).coerceIn(220.dp, 340.dp)
 
     Column(
         modifier = modifier
@@ -585,88 +712,96 @@ internal fun FullNowPlayingContent(
             .padding(horizontal = 24.dp, vertical = 10.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        // Pegangan drag-down
-        Box(
+        // Step 0 (35..100%): Pegangan + Top Bar
+        Column(
+            horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier
-                .width(38.dp)
-                .height(4.dp)
-                .clip(CircleShape)
-                .background(Color.White.copy(alpha = 0.22f)),
-        )
-
-        Spacer(modifier = Modifier.height(6.dp))
-
-        // Top bar: chevron, "Sedang diputar" + badge sumber (Lokal/Streaming), menu
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
+                .fillMaxWidth()
+                .graphicsLayer {
+                    val p = progressProvider()
+                    alpha = MupaPlayerMorphMath.staggeredElementProgress(p, stepIndex = 0)
+                    translationY = MupaPlayerMorphMath.staggeredSlideDp(p, stepIndex = 0).dp.toPx()
+                },
         ) {
-            IconButton(
-                onClick = onCollapse,
-                modifier = Modifier.size(48.dp),
+            Box(
+                modifier = Modifier
+                    .width(38.dp)
+                    .height(4.dp)
+                    .clip(CircleShape)
+                    .background(Color.White.copy(alpha = 0.28f)),
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                Icon(
-                    imageVector = Icons.Rounded.KeyboardArrowDown,
-                    contentDescription = "Ciutkan pemutar",
-                    tint = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.size(28.dp),
-                )
-            }
-
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(
-                    text = "Sedang diputar",
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-                Text(
-                    text = disp.sourceLabel,
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MupaPalette.CoralSoft,
-                )
-            }
-
-            Box {
                 IconButton(
-                    onClick = { topMenuOpen = true },
+                    onClick = onCollapse,
                     modifier = Modifier.size(48.dp),
                 ) {
                     Icon(
-                        imageVector = Icons.Rounded.MoreVert,
-                        contentDescription = "Menu pemutar",
-                        tint = MaterialTheme.colorScheme.onSurface,
+                        imageVector = Icons.Rounded.KeyboardArrowDown,
+                        contentDescription = "Ciutkan pemutar",
+                        tint = MupaPalette.LogoCream,
+                        modifier = Modifier.size(28.dp),
                     )
                 }
-                DropdownMenu(
-                    expanded = topMenuOpen,
-                    onDismissRequest = { topMenuOpen = false },
-                    containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                ) {
-                    DropdownMenuItem(
-                        text = {
-                            val label = playerState.sleepTimerMinutes?.let { "Timer tidur ($it mnt)" } ?: "Timer tidur (Mati)"
-                            Text(label)
-                        },
-                        leadingIcon = { Icon(Icons.Rounded.Timer, contentDescription = null) },
-                        onClick = {
-                            topMenuOpen = false
-                            onCycleSleepTimer()
-                        },
+
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = "Sedang diputar",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MupaPalette.LogoCream.copy(alpha = 0.72f),
                     )
-                    DropdownMenuItem(
-                        text = { Text("Mode Cinema") },
-                        leadingIcon = { Icon(Icons.Rounded.Movie, contentDescription = null) },
-                        onClick = {
-                            topMenuOpen = false
-                            onOpenCinema()
-                        },
+                    Text(
+                        text = disp.sourceLabel,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MupaPalette.CoralSoft,
                     )
+                }
+
+                Box {
+                    IconButton(
+                        onClick = { topMenuOpen = true },
+                        modifier = Modifier.size(48.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.MoreVert,
+                            contentDescription = "Menu pemutar",
+                            tint = MupaPalette.LogoCream,
+                        )
+                    }
+                    DropdownMenu(
+                        expanded = topMenuOpen,
+                        onDismissRequest = { topMenuOpen = false },
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    ) {
+                        DropdownMenuItem(
+                            text = {
+                                val label = playerState.sleepTimerMinutes?.let { "Timer tidur ($it mnt)" } ?: "Timer tidur (Mati)"
+                                Text(label)
+                            },
+                            leadingIcon = { Icon(Icons.Rounded.Timer, contentDescription = null) },
+                            onClick = {
+                                topMenuOpen = false
+                                onCycleSleepTimer()
+                            },
+                        )
+                        DropdownMenuItem(
+                            text = { Text("Mode Cinema") },
+                            leadingIcon = { Icon(Icons.Rounded.Movie, contentDescription = null) },
+                            onClick = {
+                                topMenuOpen = false
+                                onOpenCinema()
+                            },
+                        )
+                    }
                 }
             }
         }
 
-        // Area Cover / Panel Lirik (crossfade 250ms, kontrol tetap terlihat di bawah)
+        // Area Slot Cover / Panel Lirik Inline
         Box(
             modifier = Modifier
                 .weight(1f)
@@ -674,59 +809,56 @@ internal fun FullNowPlayingContent(
                 .padding(vertical = 10.dp),
             contentAlignment = Alignment.Center,
         ) {
-            AnimatedContent(
-                targetState = showInlineLyrics,
-                transitionSpec = {
-                    fadeIn(MupaMotion.standardTween(250)) togetherWith fadeOut(MupaMotion.standardTween(200))
-                },
-                label = "coverLyricsCrossfade",
-            ) { lyricsOpen ->
-                if (lyricsOpen) {
-                    MupaInlineLyricsPanel(
-                        playerState = playerState,
-                        positionProvider = positionProvider,
-                        onSeekTo = onSeekTo,
-                        onAdjustOffset = onAdjustLyricsOffset,
-                        onResetOffset = onResetLyricsOffset,
-                        onRetry = onRetryLyrics,
-                        modifier = Modifier.fillMaxSize(),
+            // Slot anchor presisi untuk cover tunggal
+            Box(
+                modifier = Modifier
+                    .size(coverSize)
+                    .onGloballyPositioned { coords ->
+                        val pos = coords.positionInRoot()
+                        onCoverSlotPositioned?.invoke(pos.x, pos.y)
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                if (renderEmbeddedCover && !showInlineLyrics) {
+                    MupaArtworkBox(
+                        artworkUrl = track.artworkUrl,
+                        contentDescription = disp.title,
+                        size = coverSize,
+                        shape = MupaRadii.ArtworkLarge,
+                        iconSize = 68.dp,
+                        memoryCacheKey = "mupa_cover_${track.id}",
+                        enableCrossfade = false,
+                        decodeSizePxOverride = 768,
                     )
-                } else {
-                    val coverSize = (maxWidthDp - 40.dp).coerceIn(240.dp, 360.dp)
-                    val playScale by animateFloatAsState(
-                        targetValue = if (playerState.isPlaying) 1f else 0.94f,
-                        animationSpec = MupaMotion.emphasizedTween(280),
-                        label = "coverBreathScale",
-                    )
-                    Box(
-                        modifier = Modifier
-                            .size(coverSize)
-                            .graphicsLayer {
-                                scaleX = playScale
-                                scaleY = playScale
-                            }
-                            .clickable(
-                                interactionSource = remember { MutableInteractionSource() },
-                                indication = null,
-                                onClick = onToggleLyrics,
-                            ),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        MupaArtworkBox(
-                            artworkUrl = track.artworkUrl,
-                            contentDescription = disp.title,
-                            size = coverSize,
-                            shape = RoundedCornerShape(24.dp),
-                            iconSize = 72.dp,
-                        )
-                    }
                 }
+            }
+
+            if (showInlineLyrics) {
+                MupaInlineLyricsPanel(
+                    playerState = playerState,
+                    positionProvider = positionProvider,
+                    onSeekTo = onSeekTo,
+                    onAdjustOffset = onAdjustLyricsOffset,
+                    onResetOffset = onResetLyricsOffset,
+                    onRetry = onRetryLyrics,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .graphicsLayer {
+                            alpha = MupaPlayerMorphMath.staggeredElementProgress(progressProvider(), stepIndex = 1)
+                        },
+                )
             }
         }
 
-        // Judul 24 SemiBold + Artis 16 sekunder + Tombol Favorit
+        // Step 1: Judul + Artis + Favorit
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .graphicsLayer {
+                    val p = progressProvider()
+                    alpha = MupaPlayerMorphMath.staggeredElementProgress(p, stepIndex = 1)
+                    translationY = MupaPlayerMorphMath.staggeredSlideDp(p, stepIndex = 1).dp.toPx()
+                },
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween,
         ) {
@@ -738,15 +870,15 @@ internal fun FullNowPlayingContent(
             ) {
                 Text(
                     text = disp.title,
-                    style = MaterialTheme.typography.headlineSmall,
-                    color = MaterialTheme.colorScheme.onSurface,
+                    style = MaterialTheme.typography.headlineSmall.copy(fontWeight = FontWeight.Bold),
+                    color = MupaPalette.LogoCream,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
                 Text(
                     text = disp.subtitle,
                     style = MaterialTheme.typography.bodyLarge,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = MupaPalette.LogoCream.copy(alpha = 0.72f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
@@ -758,7 +890,7 @@ internal fun FullNowPlayingContent(
                 Icon(
                     imageVector = if (track.isFavorite) Icons.Rounded.Favorite else Icons.Outlined.FavoriteBorder,
                     contentDescription = if (track.isFavorite) "Hapus dari favorit" else "Tambah ke favorit",
-                    tint = if (track.isFavorite) MupaPalette.CoralPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
+                    tint = if (track.isFavorite) MupaPalette.CoralPrimary else MupaPalette.LogoCream.copy(alpha = 0.78f),
                     modifier = Modifier.size(26.dp),
                 )
             }
@@ -766,181 +898,237 @@ internal fun FullNowPlayingContent(
 
         Spacer(modifier = Modifier.height(14.dp))
 
-        // Seekbar custom (4dp -> 6dp saat drag, thumb saat drag, segmen buffer hanya Streaming, waktu tabular)
-        MupaCustomSeekbar(
-            progress = playerState.progressFraction,
-            bufferedFraction = playerState.bufferedFraction,
-            showBuffer = track.sourceType == AudioSourceType.STREAMING,
-            positionMs = playerState.positionMs,
-            durationMs = playerState.durationMs,
-            onSeekTo = onSeekTo,
-        )
-
-        playerState.errorMessage?.let { err ->
-            Text(
-                text = err,
-                style = MaterialTheme.typography.bodySmall,
-                color = MupaPalette.CoralSoft,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(top = 6.dp),
+        // Step 2: Seekbar
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .graphicsLayer {
+                    val p = progressProvider()
+                    alpha = MupaPlayerMorphMath.staggeredElementProgress(p, stepIndex = 2)
+                    translationY = MupaPlayerMorphMath.staggeredSlideDp(p, stepIndex = 2).dp.toPx()
+                },
+        ) {
+            MupaCustomSeekbar(
+                progress = playerState.progressFraction,
+                bufferedFraction = playerState.bufferedFraction,
+                showBuffer = track.sourceType == AudioSourceType.STREAMING,
+                positionMs = playerState.positionMs,
+                durationMs = playerState.durationMs,
+                onSeekTo = onSeekTo,
             )
+
+            playerState.errorMessage?.let { err ->
+                Text(
+                    text = err,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MupaPalette.CoralSoft,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 6.dp),
+                )
+            }
         }
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(14.dp))
 
-        // 5 Kontrol Transport Utama (Play/Pause koral 72dp)
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
+        // Step 3: Transport Utama (tombol Play/Pause KREM #F6F4EF kontras di atas warna dinamis apa pun) + Baris Aksi Berlabel (N9)
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .graphicsLayer {
+                    val p = progressProvider()
+                    alpha = MupaPlayerMorphMath.staggeredElementProgress(p, stepIndex = 3)
+                    translationY = MupaPlayerMorphMath.staggeredSlideDp(p, stepIndex = 3).dp.toPx()
+                },
         ) {
-            IconButton(
-                onClick = onToggleShuffle,
-                modifier = Modifier.size(48.dp),
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                Icon(
-                    imageVector = Icons.Rounded.Shuffle,
-                    contentDescription = "Mode acak",
-                    tint = if (playerState.isShuffleEnabled) MupaPalette.CoralPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            IconButton(
-                onClick = onSkipPrevious,
-                modifier = Modifier.size(52.dp),
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.SkipPrevious,
-                    contentDescription = "Lagu sebelumnya",
-                    tint = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.size(34.dp),
-                )
-            }
-            Box(
-                modifier = Modifier
-                    .size(68.dp)
-                    .clip(CircleShape)
-                    .background(Color.White)
-                    .clickable(onClick = onTogglePlayPause),
-                contentAlignment = Alignment.Center,
-            ) {
-                if (playerState.isBuffering) {
-                    CircularProgressIndicator(
-                        color = MupaPalette.LogoCharcoal,
-                        strokeWidth = 3.dp,
-                        modifier = Modifier.size(28.dp),
-                    )
-                } else {
+                IconButton(
+                    onClick = onToggleShuffle,
+                    modifier = Modifier.size(48.dp),
+                ) {
                     Icon(
-                        imageVector = if (playerState.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
-                        contentDescription = if (playerState.isPlaying) "Jeda" else "Putar",
-                        tint = MupaPalette.LogoCharcoal,
+                        imageVector = Icons.Rounded.Shuffle,
+                        contentDescription = "Mode acak",
+                        tint = if (playerState.isShuffleEnabled) MupaPalette.CoralPrimary else MupaPalette.LogoCream.copy(alpha = 0.72f),
+                    )
+                }
+                IconButton(
+                    onClick = onSkipPrevious,
+                    modifier = Modifier.size(52.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.SkipPrevious,
+                        contentDescription = "Lagu sebelumnya",
+                        tint = MupaPalette.LogoCream,
                         modifier = Modifier.size(34.dp),
                     )
                 }
-            }
-            IconButton(
-                onClick = onSkipNext,
-                modifier = Modifier.size(52.dp),
-            ) {
-                Icon(
-                    imageVector = Icons.Rounded.SkipNext,
-                    contentDescription = "Lagu berikutnya",
-                    tint = MaterialTheme.colorScheme.onSurface,
-                    modifier = Modifier.size(34.dp),
-                )
-            }
-            IconButton(
-                onClick = onCycleRepeat,
-                modifier = Modifier.size(48.dp),
-            ) {
-                val repeatIcon = if (playerState.repeatMode == RepeatMode.ONE) {
-                    Icons.Rounded.RepeatOne
-                } else {
-                    Icons.Rounded.Repeat
-                }
-                Icon(
-                    imageVector = repeatIcon,
-                    contentDescription = "Mode ulangi",
-                    tint = if (playerState.repeatMode != RepeatMode.OFF) {
-                        MupaPalette.CoralPrimary
+                Box(
+                    modifier = Modifier
+                        .size(70.dp)
+                        .clip(CircleShape)
+                        .background(MupaPalette.LogoCream)
+                        .clickable(onClick = onTogglePlayPause),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    if (playerState.isBuffering) {
+                        CircularProgressIndicator(
+                            color = MupaPalette.LogoCharcoal,
+                            strokeWidth = 3.dp,
+                            modifier = Modifier.size(28.dp),
+                        )
                     } else {
-                        MaterialTheme.colorScheme.onSurfaceVariant
-                    },
-                )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(16.dp))
-
-        // Baris Aksi: Lirik, Antrean (+badge), EQ, Cinema (hanya ikon + contentDescription)
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceEvenly,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            NowPlayingActionIcon(
-                icon = Icons.Rounded.Lyrics,
-                description = "Lirik",
-                active = showInlineLyrics,
-                onClick = onToggleLyrics,
-            )
-            BadgedBox(
-                badge = {
-                    if (playerState.queue.isNotEmpty()) {
-                        Badge(
-                            containerColor = MaterialTheme.colorScheme.surfaceContainerHigh,
-                            contentColor = MaterialTheme.colorScheme.onSurface,
-                        ) {
-                            Text("${playerState.queue.size}")
-                        }
+                        Icon(
+                            imageVector = if (playerState.isPlaying) Icons.Rounded.Pause else Icons.Rounded.PlayArrow,
+                            contentDescription = if (playerState.isPlaying) "Jeda" else "Putar",
+                            tint = MupaPalette.LogoCharcoal,
+                            modifier = Modifier.size(36.dp),
+                        )
                     }
-                },
+                }
+                IconButton(
+                    onClick = onSkipNext,
+                    modifier = Modifier.size(52.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Rounded.SkipNext,
+                        contentDescription = "Lagu berikutnya",
+                        tint = MupaPalette.LogoCream,
+                        modifier = Modifier.size(34.dp),
+                    )
+                }
+                IconButton(
+                    onClick = onCycleRepeat,
+                    modifier = Modifier.size(48.dp),
+                ) {
+                    val repeatIcon = if (playerState.repeatMode == RepeatMode.ONE) {
+                        Icons.Rounded.RepeatOne
+                    } else {
+                        Icons.Rounded.Repeat
+                    }
+                    Icon(
+                        imageVector = repeatIcon,
+                        contentDescription = "Mode ulangi",
+                        tint = if (playerState.repeatMode != RepeatMode.OFF) {
+                            MupaPalette.CoralPrimary
+                        } else {
+                            MupaPalette.LogoCream.copy(alpha = 0.72f)
+                        },
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // Baris Aksi Bawah dengan Ikon + Label 11sp + Badge Antrean rapi di pojok ikon (perbaikan N9)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                verticalAlignment = Alignment.CenterVertically,
             ) {
-                NowPlayingActionIcon(
+                NowPlayingActionButton(
+                    icon = Icons.Rounded.Lyrics,
+                    label = "Lirik",
+                    contentDesc = "Lirik",
+                    active = showInlineLyrics,
+                    onClick = onToggleLyrics,
+                )
+                NowPlayingActionButton(
                     icon = Icons.AutoMirrored.Rounded.QueueMusic,
-                    description = "Antrean putar",
+                    label = "Antrean",
+                    contentDesc = "Antrean putar",
                     active = playerState.activeOverlay == PlayerOverlayPane.QUEUE,
+                    badgeCount = playerState.queue.size.takeIf { it > 0 },
                     onClick = onOpenQueue,
                 )
+                NowPlayingActionButton(
+                    icon = Icons.Rounded.GraphicEq,
+                    label = "EQ",
+                    contentDesc = "Equalizer 5-band",
+                    active = playerState.activeOverlay == PlayerOverlayPane.EQUALIZER ||
+                        playerState.eqPreset != com.xeno.mupa.playback.eq.EqPreset.FLAT,
+                    onClick = onOpenEqualizer,
+                )
+                NowPlayingActionButton(
+                    icon = Icons.Rounded.Movie,
+                    label = "Cinema",
+                    contentDesc = "Mode Cinema",
+                    active = playerState.isCinemaMode,
+                    onClick = onOpenCinema,
+                )
             }
-            NowPlayingActionIcon(
-                icon = Icons.Rounded.GraphicEq,
-                description = "Equalizer 5-band",
-                active = playerState.activeOverlay == PlayerOverlayPane.EQUALIZER || playerState.eqPreset != com.xeno.mupa.playback.eq.EqPreset.FLAT,
-                onClick = onOpenEqualizer,
-            )
-            NowPlayingActionIcon(
-                icon = Icons.Rounded.Movie,
-                description = "Mode Cinema",
-                active = playerState.isCinemaMode,
-                onClick = onOpenCinema,
-            )
         }
     }
 }
 
 @Composable
-private fun NowPlayingActionIcon(
+private fun NowPlayingActionButton(
     icon: ImageVector,
-    description: String,
+    label: String,
+    contentDesc: String,
     active: Boolean,
     onClick: () -> Unit,
+    badgeCount: Int? = null,
 ) {
-    IconButton(
-        onClick = onClick,
+    val tint = if (active) MupaPalette.CoralPrimary else MupaPalette.LogoCream.copy(alpha = 0.78f)
+    Column(
         modifier = Modifier
-            .size(48.dp)
-            .clip(CircleShape)
-            .background(if (active) MupaPalette.CoralTint14 else Color.Transparent),
+            .clip(RoundedCornerShape(14.dp))
+            .background(if (active) MupaPalette.CoralPrimary.copy(alpha = 0.16f) else Color.Transparent)
+            .clickable(onClick = onClick)
+            .semantics { contentDescription = contentDesc }
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(3.dp),
     ) {
-        Icon(
-            imageVector = icon,
-            contentDescription = description,
-            tint = if (active) MupaPalette.CoralPrimary else MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.size(22.dp),
+        Box(
+            modifier = Modifier.size(28.dp),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = tint,
+                modifier = Modifier.size(22.dp),
+            )
+            if (badgeCount != null) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .offset(x = 6.dp, y = (-4).dp)
+                        .clip(CircleShape)
+                        .background(if (active) MupaPalette.CoralPrimary else MupaPalette.Surface2)
+                        .padding(horizontal = 4.dp, vertical = 1.dp),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        text = if (badgeCount > 99) "99+" else "$badgeCount",
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontSize = 9.sp,
+                            lineHeight = 10.sp,
+                            fontWeight = FontWeight.Bold,
+                            fontFeatureSettings = TABULAR_NUMS_FEATURE,
+                        ),
+                        color = if (active) MupaPalette.LogoCharcoal else MupaPalette.LogoCream,
+                    )
+                }
+            }
+        }
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall.copy(
+                fontSize = 11.sp,
+                lineHeight = 13.sp,
+                fontWeight = if (active) FontWeight.SemiBold else FontWeight.Medium,
+            ),
+            color = tint,
+            maxLines = 1,
         )
     }
 }
@@ -1020,39 +1208,35 @@ fun MupaCustomSeekbar(
                     val y = (size.height - h) / 2f
                     val radius = CornerRadius(h / 2f, h / 2f)
 
-                    // Base track
                     drawRoundRect(
-                        color = Color.White.copy(alpha = 0.14f),
+                        color = Color.White.copy(alpha = 0.16f),
                         topLeft = Offset(0f, y),
                         size = Size(size.width, h),
                         cornerRadius = radius,
                     )
 
-                    // Segmen buffer samar hanya untuk Streaming
                     if (showBuffer && bufferedFraction > 0f) {
                         drawRoundRect(
-                            color = Color.White.copy(alpha = 0.24f),
+                            color = Color.White.copy(alpha = 0.28f),
                             topLeft = Offset(0f, y),
                             size = Size(size.width * bufferedFraction.coerceIn(0f, 1f), h),
                             cornerRadius = radius,
                         )
                     }
 
-                    // Active progress koral
                     val activeW = size.width * displayedFraction
                     if (activeW > 0f) {
                         drawRoundRect(
-                            color = MupaPalette.CoralPrimary,
+                            color = MupaPalette.LogoCream,
                             topLeft = Offset(0f, y),
                             size = Size(activeW, h),
                             cornerRadius = radius,
                         )
                     }
 
-                    // Thumb hanya saat drag
                     if (thumbAlpha > 0.01f) {
                         drawCircle(
-                            color = MupaPalette.CoralPrimary.copy(alpha = thumbAlpha),
+                            color = MupaPalette.LogoCream.copy(alpha = thumbAlpha),
                             radius = 6.dp.toPx(),
                             center = Offset(activeW.coerceIn(6.dp.toPx(), size.width - 6.dp.toPx()), size.height / 2f),
                         )
@@ -1067,13 +1251,13 @@ fun MupaCustomSeekbar(
             Text(
                 text = formatDurationMs(displayedPosMs),
                 style = MaterialTheme.typography.bodySmall.copy(fontFeatureSettings = TABULAR_NUMS_FEATURE),
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                color = MupaPalette.LogoCream.copy(alpha = 0.72f),
             )
             TrackDisplayRules.formatDuration(durationMs)?.let { total ->
                 Text(
                     text = total,
                     style = MaterialTheme.typography.bodySmall.copy(fontFeatureSettings = TABULAR_NUMS_FEATURE),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    color = MupaPalette.LogoCream.copy(alpha = 0.72f),
                 )
             }
         }

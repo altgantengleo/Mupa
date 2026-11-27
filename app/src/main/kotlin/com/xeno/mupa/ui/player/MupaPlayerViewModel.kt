@@ -691,8 +691,18 @@ class MupaPlayerViewModel @Inject constructor(
         udExtractJob?.cancel()
         udExtractJob = viewModelScope.launch(Dispatchers.IO) {
             val model: Any = if (art.startsWith("/")) File(art) else art
+            val loader = SingletonImageLoader.get(appContext)
+            // Prefetch resolusi penuh (768px) dengan memoryCacheKey bersama sebelum animasi cover (anti-kedip S2)
+            runCatching {
+                loader.enqueue(
+                    ImageRequest.Builder(appContext)
+                        .data(model)
+                        .size(768)
+                        .memoryCacheKey("mupa_cover_${track.id}")
+                        .build(),
+                )
+            }
             val bmp = runCatching {
-                val loader = SingletonImageLoader.get(appContext)
                 val req = ImageRequest.Builder(appContext)
                     .data(model)
                     .size(128)

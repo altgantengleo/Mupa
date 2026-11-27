@@ -43,6 +43,7 @@ import com.xeno.mupa.navigation.MupaTopLevelDestination
 import com.xeno.mupa.navigation.navigateToTopLevel
 import com.xeno.mupa.ui.onboarding.ArtistOnboardingScreen
 import com.xeno.mupa.ui.onboarding.ArtistOnboardingViewModel
+import com.xeno.mupa.ui.player.MupaPlayerMorphMath
 import com.xeno.mupa.ui.player.MupaPlayerOverlayHost
 import com.xeno.mupa.ui.player.MupaPlayerSheetState
 import com.xeno.mupa.ui.player.MupaPlayerUiState
@@ -261,8 +262,8 @@ fun MupaApp(
                         .padding(horizontal = 20.dp, vertical = 12.dp)
                         .graphicsLayer {
                             val p = playerSheetState.progress
-                            translationY = navSlidePx * p
-                            alpha = (1f - p / 0.50f).coerceIn(0f, 1f)
+                            translationY = navSlidePx * MupaPlayerMorphMath.bottomNavSlideFraction(p)
+                            alpha = MupaPlayerMorphMath.bottomNavAlpha(p)
                         },
                 )
             }
