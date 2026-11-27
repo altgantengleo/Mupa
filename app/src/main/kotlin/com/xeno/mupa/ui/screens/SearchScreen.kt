@@ -249,6 +249,7 @@ fun SearchScreen(
     onRetry: () -> Unit,
     onImportLocalFiles: () -> Unit = {},
     onSwitchSource: ((AudioSourceType) -> Unit)? = null,
+    onPlayFromSearch: ((Track) -> Unit)? = null,
     favoriteArtists: List<Artist> = emptyList(),
     modifier: Modifier = Modifier,
 ) {
@@ -481,7 +482,18 @@ fun SearchScreen(
                             durationText = display.durationText,
                             artworkUrl = track.artworkUrl,
                             isPlaying = track.id == currentPlayingTrackId,
-                            onClick = { onPlayTrack(uiState.results, index) },
+                            onClick = {
+                                // Fase 2T: ketuk hasil cari Streaming memulai [lagu itu] + Radio (BUKAN sisa hasil cari)
+                                if (track.sourceType == AudioSourceType.STREAMING) {
+                                    if (onPlayFromSearch != null) {
+                                        onPlayFromSearch(track)
+                                    } else {
+                                        onPlayTrack(listOf(track), 0)
+                                    }
+                                } else {
+                                    onPlayTrack(uiState.results, index)
+                                }
+                            },
                         )
                     }
                 }

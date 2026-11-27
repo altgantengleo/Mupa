@@ -87,7 +87,6 @@ class T0QueueBlueBugReproTest {
         assertTrue(tracks.any { it.title.contains("Slowed", ignoreCase = true) })
     }
 
-    @Ignore("T0: reproduksi bug antrean 'blue' terbukti gagal di T0 (AssertionError); akan diaktifkan & diluluskan di T1")
     @Test
     fun t0Repro_tappingBlueInSearchShouldNotQueueOtherVersionsOfBlue() {
         val searchResults = loadBlueFixtureTracks()
@@ -123,7 +122,8 @@ class T0QueueBlueBugReproTest {
         }
 
         composeRule.waitForIdle()
-        composeRule.onAllNodesWithText("blue").onFirst().performClick()
+        // Node index 0 dengan teks "blue" adalah kotak pencarian; baris hasil pertama adalah "yung kai" / "blue"
+        composeRule.onAllNodesWithText("yung kai").onFirst().performClick()
         composeRule.waitForIdle()
 
         val actualQueue = queuedTracks

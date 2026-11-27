@@ -4,10 +4,12 @@ import com.xeno.mupa.core.domain.ResolvedStream
 import com.xeno.mupa.core.model.Artist
 import com.xeno.mupa.core.model.Track
 import com.xeno.mupa.streaming.api.AudioQualityPreference
+import com.xeno.mupa.streaming.api.RadioPage
 import com.xeno.mupa.streaming.api.StreamLookupRequest
 import com.xeno.mupa.streaming.api.StreamingAudioProvider
 import com.xeno.mupa.streaming.api.StreamingCatalogProvider
 import com.xeno.mupa.streaming.api.StreamingError
+import com.xeno.mupa.streaming.api.StreamingRadioProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.buildJsonObject
@@ -34,7 +36,7 @@ import java.util.concurrent.atomic.AtomicBoolean
  */
 class InnerTubeProvider(
     private val httpClient: OkHttpClient = defaultHttpClient(),
-) : StreamingAudioProvider, StreamingCatalogProvider {
+) : StreamingAudioProvider, StreamingCatalogProvider, StreamingRadioProvider {
 
     override val providerId: String = "innertube"
     override val priority: Int = 10
@@ -136,6 +138,133 @@ class InnerTubeProvider(
 
     override suspend fun getArtistTopTracks(artistId: String, artistName: String): Result<List<Track>> =
         searchTracks(artistName, limit = 10)
+
+    /**
+     * Endpoint `POST /youtubei/v1/next` (Radio / Up Next / Automix) clean-room.
+     * - Untuk seed baru: memanggil `playlistId = "RDAMVM$videoId"`.
+     * - Jika hasil <= 1 lagu, coba bare `videoId` (automix) dan ikuti `automixPlaylistId` bila ada.
+     * - Jika masih kosong/sedikit (mis. session tamu terbatas), fallback ke pencarian lagu artis terkait.
+     */
+    override suspend fun getRadioNext(
+        seedTrack: Track,
+        continuationToken: String?,
+        playlistId: String?,
+    ): Result<RadioPage> = withContext(Dispatchers.IO) {
+        val resolvedVideoId = if (isLikelyYouTubeVideoId(seedTrack.id)) {
+            seedTrack.id
+        } else {
+            searchTracks("${seedTrack.artistName} ${seedTrack.title}", limit = 1)
+                .getOrNull()?.firstOrNull()?.id
+                ?: return@withContext fallbackArtistRadioSearch(seedTrack)
+        }
+
+        val effectivePlaylistId = playlistId ?: "RDAMVM$resolvedVideoId"
+        val primaryPage = callNextEndpoint(
+            videoId = if (continuationToken == null) resolvedVideoId else null,
+            playlistId = if (continuationToken == null) effectivePlaylistId else null,
+            continuation = continuationToken,
+        ).getOrNull()
+
+        var bestPage = primaryPage
+
+        // Jika RDAMVM mengembalikan <= 1 lagu pada halaman awal, coba bare videoId untuk automix
+        if (continuationToken == null && (bestPage == null || bestPage.tracks.size <= 1)) {
+            val barePage = callNextEndpoint(
+                videoId = resolvedVideoId,
+                playlistId = null,
+                continuation = null,
+            ).getOrNull()
+            if (barePage != null) {
+                val automixId = barePage.automixPlaylistId
+                if (!automixId.isNullOrBlank()) {
+                    val expanded = callNextEndpoint(
+                        videoId = null,
+                        playlistId = automixId,
+                        continuation = null,
+                    ).getOrNull()
+                    if (expanded != null && expanded.tracks.size > (bestPage?.tracks?.size ?: 0)) {
+                        bestPage = expanded
+                    }
+                }
+                if (barePage.tracks.size > (bestPage?.tracks?.size ?: 0)) {
+                    bestPage = barePage
+                }
+            }
+        }
+
+        if (bestPage != null && bestPage.tracks.size > 1) {
+            return@withContext Result.success(
+                RadioPage(
+                    tracks = bestPage.tracks,
+                    continuationToken = bestPage.continuationToken,
+                    playlistId = bestPage.automixPlaylistId ?: effectivePlaylistId,
+                ),
+            )
+        }
+
+        // Fallback aman: bila halaman awal /next tamu hanya berisi <= 1 item, ambil lagu serupa berbasis artis
+        if (continuationToken == null) {
+            return@withContext fallbackArtistRadioSearch(seedTrack, effectivePlaylistId)
+        }
+
+        Result.success(
+            RadioPage(
+                tracks = bestPage?.tracks.orEmpty(),
+                continuationToken = bestPage?.continuationToken,
+                playlistId = effectivePlaylistId,
+            ),
+        )
+    }
+
+    override suspend fun getArtistRadio(
+        artistId: String,
+        artistName: String,
+        continuationToken: String?,
+    ): Result<RadioPage> = withContext(Dispatchers.IO) {
+        val topTracks = getArtistTopTracks(artistId, artistName).getOrDefault(emptyList())
+        val first = topTracks.firstOrNull()
+            ?: return@withContext Result.failure(StreamingError.Unavailable("Lagu artis $artistName tidak ditemukan"))
+        val radio = getRadioNext(first, continuationToken = continuationToken).getOrNull()
+        val combined = (topTracks + radio?.tracks.orEmpty()).distinctBy { it.id }
+        Result.success(
+            RadioPage(
+                tracks = combined,
+                continuationToken = radio?.continuationToken,
+                playlistId = radio?.playlistId,
+            ),
+        )
+    }
+
+    private fun callNextEndpoint(
+        videoId: String?,
+        playlistId: String?,
+        continuation: String?,
+    ): Result<InnerTubeParser.ParsedNextPage> {
+        val body = buildJsonObject {
+            put("context", InnerTubeProfiles.WEB_REMIX.buildContextJson())
+            if (!videoId.isNullOrBlank()) put("videoId", videoId)
+            if (!playlistId.isNullOrBlank()) put("playlistId", playlistId)
+            if (!continuation.isNullOrBlank()) put("continuation", continuation)
+        }
+        return postInnerTube(InnerTubeProfiles.WEB_REMIX, "next", body.toString()).fold(
+            onSuccess = { InnerTubeParser.parseNextResponse(it) },
+            onFailure = { Result.failure(it) },
+        )
+    }
+
+    private suspend fun fallbackArtistRadioSearch(
+        seedTrack: Track,
+        playlistId: String? = null,
+    ): Result<RadioPage> {
+        val artistQuery = seedTrack.artistName.takeIf { it.isNotBlank() && !it.equals("Artis Tidak Diketahui", true) }
+            ?: seedTrack.title
+        val tracks = searchTracks("$artistQuery official audio", limit = 16).getOrDefault(emptyList())
+        return if (tracks.isNotEmpty()) {
+            Result.success(RadioPage(tracks = tracks, continuationToken = null, playlistId = playlistId))
+        } else {
+            Result.failure(StreamingError.Unavailable("Gagal memuat radio untuk ${seedTrack.title}"))
+        }
+    }
 
     override suspend fun resolveAudio(request: StreamLookupRequest): Result<ResolvedStream> =
         withContext(Dispatchers.IO) {

@@ -28,6 +28,7 @@ import com.xeno.mupa.playback.QueuePersistenceStore
 import com.xeno.mupa.playback.eq.FiveBandEqualizerProcessor
 import com.xeno.mupa.streaming.aggregator.ProviderRegistry
 import com.xeno.mupa.streaming.api.StreamingLyricsProvider
+import com.xeno.mupa.streaming.api.StreamingRadioProvider
 import com.xeno.mupa.streaming.innertube.InnerTubeProvider
 import com.xeno.mupa.streaming.jiosaavn.JioSaavnProvider
 import dagger.Binds
@@ -88,6 +89,11 @@ object AppInfrastructureModule {
     @Singleton
     fun provideInnerTubeProvider(client: OkHttpClient): InnerTubeProvider =
         InnerTubeProvider(client)
+
+    @Provides
+    @Singleton
+    fun provideStreamingRadioProvider(innerTubeProvider: InnerTubeProvider): StreamingRadioProvider =
+        innerTubeProvider
 
     @Provides
     @Singleton

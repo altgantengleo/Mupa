@@ -59,6 +59,27 @@ interface StreamingCatalogProvider {
     suspend fun getArtistTopTracks(artistId: String, artistName: String): Result<List<Track>>
 }
 
+data class RadioPage(
+    val tracks: List<Track>,
+    val continuationToken: String? = null,
+    val playlistId: String? = null,
+)
+
+interface StreamingRadioProvider {
+    val providerId: String
+    suspend fun getRadioNext(
+        seedTrack: Track,
+        continuationToken: String? = null,
+        playlistId: String? = null,
+    ): Result<RadioPage>
+
+    suspend fun getArtistRadio(
+        artistId: String,
+        artistName: String,
+        continuationToken: String? = null,
+    ): Result<RadioPage>
+}
+
 interface StreamingLyricsProvider {
     val providerId: String
     suspend fun fetchLyrics(

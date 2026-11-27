@@ -19,6 +19,8 @@ import com.google.common.util.concurrent.ListenableFuture
 import com.xeno.mupa.core.designsystem.theme.UltraDynamicPalette
 import com.xeno.mupa.core.designsystem.theme.UltraDynamicPaletteCache
 import com.xeno.mupa.core.model.AudioSourceType
+import com.xeno.mupa.core.model.QueueSource
+import com.xeno.mupa.core.model.SmartQueueFilter
 import com.xeno.mupa.core.model.Track
 import java.io.File
 import com.xeno.mupa.data.local.LocalLibraryRepository
@@ -29,6 +31,7 @@ import com.xeno.mupa.playback.QueuePersistenceStore
 import com.xeno.mupa.playback.eq.EqPreset
 import com.xeno.mupa.playback.eq.FiveBandEqualizerProcessor
 import com.xeno.mupa.streaming.api.StreamingError
+import com.xeno.mupa.streaming.api.StreamingRadioProvider
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.Dispatchers
@@ -53,6 +56,7 @@ class MupaPlayerViewModel @Inject constructor(
     private val equalizerProcessor: FiveBandEqualizerProcessor,
     private val lyricsRepository: LyricsRepository,
     private val localLibraryRepository: LocalLibraryRepository,
+    private val radioProvider: StreamingRadioProvider,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(MupaPlayerUiState())
@@ -64,6 +68,7 @@ class MupaPlayerViewModel @Inject constructor(
     private var positionSyncJob: Job? = null
     private var lyricsFetchJob: Job? = null
     private var udExtractJob: Job? = null
+    private var radioLoadJob: Job? = null
 
     @Volatile
     private var isCleared: Boolean = false
@@ -102,9 +107,12 @@ class MupaPlayerViewModel @Inject constructor(
                 val track = queue[idx]
                 val realDur = ctrl.duration.takeIf { it > 0L } ?: track.durationMs.coerceAtLeast(0L)
                 _uiState.update {
+                    val updatedRecent = (it.recentPlayedIds.filterNot { id -> id == track.id } + track.id)
+                        .takeLast(SmartQueueFilter.RECENT_HISTORY_LIMIT)
                     it.copy(
                         currentIndex = idx,
                         currentTrack = track,
+                        recentPlayedIds = updatedRecent,
                         positionMs = 0L,
                         bufferedPositionMs = 0L,
                         durationMs = realDur,
@@ -121,6 +129,7 @@ class MupaPlayerViewModel @Inject constructor(
                 persistCurrentQueue()
                 extractUltraDynamicForTrack(track)
                 fetchLyricsForCurrentTrack()
+                maybeLoadMoreRadioQueue()
             }
         }
 
@@ -248,12 +257,26 @@ class MupaPlayerViewModel @Inject constructor(
                 if (restoredTracks.isEmpty()) return@launch
                 val safeIndex = restored.currentIndex.coerceIn(0, restoredTracks.lastIndex)
                 val current = restoredTracks[safeIndex]
+                val restoredSource = restored.source.toDomain()
+                val restoredOrder = if (restored.originalOrderIds.isNotEmpty()) {
+                    val byId = restoredTracks.associateBy { it.id }
+                    restored.originalOrderIds.mapNotNull { byId[it] }.ifEmpty { restoredTracks }
+                } else {
+                    restoredTracks
+                }
                 _uiState.update { state ->
                     if (state.queue.isNotEmpty()) return@update state
                     state.copy(
                         queue = restoredTracks,
                         currentIndex = safeIndex,
                         currentTrack = current,
+                        queueSource = restoredSource,
+                        continuationToken = restored.continuationToken,
+                        radioPlaylistId = restored.radioPlaylistId,
+                        isShuffleEnabled = restored.isShuffleEnabled,
+                        shuffleSeed = restored.shuffleSeed,
+                        originalQueueOrder = restoredOrder,
+                        recentPlayedIds = restored.recentTrackIds,
                         positionMs = restored.positionMs.coerceIn(0L, current.durationMs.coerceAtLeast(1L)),
                         durationMs = current.durationMs.coerceAtLeast(0L),
                     )
@@ -295,14 +318,91 @@ class MupaPlayerViewModel @Inject constructor(
                 tracks = snapshot.queue,
                 currentIndex = snapshot.currentIndex,
                 positionMs = snapshot.positionMs,
+                source = snapshot.queueSource,
+                continuationToken = snapshot.continuationToken,
+                radioPlaylistId = snapshot.radioPlaylistId,
+                isShuffleEnabled = snapshot.isShuffleEnabled,
+                shuffleSeed = snapshot.shuffleSeed,
+                originalOrderIds = snapshot.originalQueueOrder.map { it.id },
+                recentTrackIds = snapshot.recentPlayedIds,
             )
         }
     }
 
-    fun playQueue(tracks: List<Track>, startIndex: Int = 0) {
+    /**
+     * Memutar hasil pencarian tunggal (perbaikan bug "blue" Fase 2T):
+     * - Mode Streaming: antrean = [lagu itu] + RADIO dari lagu itu (BUKAN sisa hasil pencarian).
+     * - Mode Lokal: memutar daftar lokal sesuai urutan.
+     */
+    fun playFromSearch(track: Track) {
+        if (track.sourceType == AudioSourceType.LOCAL) {
+            playQueue(listOf(track), 0, QueueSource.Local("Hasil Pencarian Lokal"))
+            return
+        }
+        val radioSource = QueueSource.Radio(
+            seedTrackId = track.id,
+            seedTitle = track.title,
+            seedArtist = track.artistName,
+        )
+        playQueue(listOf(track), 0, radioSource)
+        loadRadioForSeed(track, radioSource, continuation = null, playlistId = null)
+    }
+
+    fun playArtistRadio(artistId: String, artistName: String, initialTracks: List<Track> = emptyList()) {
+        val source = QueueSource.Artist(artistId = artistId, artistName = artistName)
+        if (initialTracks.isNotEmpty()) {
+            val cleaned = SmartQueueFilter.filterAndOrderRadioCandidates(
+                seed = initialTracks.first(),
+                candidates = initialTracks.drop(1),
+                existingQueue = listOf(initialTracks.first()),
+                recentTrackIds = _uiState.value.recentPlayedIds.toSet(),
+            )
+            playQueue(listOf(initialTracks.first()) + cleaned, 0, source)
+            maybeLoadMoreRadioQueue()
+        } else {
+            radioLoadJob?.cancel()
+            radioLoadJob = viewModelScope.launch {
+                _uiState.update { it.copy(isLoadingMoreQueue = true) }
+                radioProvider.getArtistRadio(artistId, artistName).onSuccess { page ->
+                    val filtered = SmartQueueFilter.filterAndOrderRadioCandidates(
+                        seed = page.tracks.firstOrNull(),
+                        candidates = page.tracks.drop(1),
+                        recentTrackIds = _uiState.value.recentPlayedIds.toSet(),
+                    )
+                    val full = listOfNotNull(page.tracks.firstOrNull()) + filtered
+                    if (full.isNotEmpty()) {
+                        playQueue(full, 0, source)
+                        _uiState.update {
+                            it.copy(
+                                continuationToken = page.continuationToken,
+                                radioPlaylistId = page.playlistId,
+                                isLoadingMoreQueue = false,
+                            )
+                        }
+                        persistCurrentQueue()
+                    } else {
+                        _uiState.update { it.copy(isLoadingMoreQueue = false) }
+                    }
+                }.onFailure {
+                    _uiState.update { it.copy(isLoadingMoreQueue = false) }
+                }
+            }
+        }
+    }
+
+    fun playQueue(
+        tracks: List<Track>,
+        startIndex: Int = 0,
+        source: QueueSource? = null,
+    ) {
         if (tracks.isEmpty()) return
         val safeIndex = startIndex.coerceIn(0, tracks.lastIndex)
         val track = tracks[safeIndex]
+        val resolvedSource = source ?: if (track.sourceType == AudioSourceType.LOCAL) {
+            QueueSource.Local()
+        } else {
+            QueueSource.MixMupa()
+        }
 
         if (track.sourceType == AudioSourceType.LOCAL && track.id.startsWith("content://")) {
             if (!localLibraryRepository.isUriReadable(Uri.parse(track.id))) {
@@ -314,11 +414,23 @@ class MupaPlayerViewModel @Inject constructor(
             viewModelScope.launch { localLibraryRepository.recordPlay(track.id) }
         }
 
+        radioLoadJob?.cancel()
+        val updatedRecent = (_uiState.value.recentPlayedIds.filterNot { it == track.id } + track.id)
+            .takeLast(SmartQueueFilter.RECENT_HISTORY_LIMIT)
+
         _uiState.update {
             it.copy(
                 queue = tracks,
                 currentIndex = safeIndex,
                 currentTrack = track,
+                queueSource = resolvedSource,
+                continuationToken = null,
+                radioPlaylistId = null,
+                isLoadingMoreQueue = false,
+                isShuffleEnabled = false,
+                shuffleSeed = 0L,
+                originalQueueOrder = tracks,
+                recentPlayedIds = updatedRecent,
                 positionMs = 0L,
                 bufferedPositionMs = 0L,
                 durationMs = track.durationMs.coerceAtLeast(0L),
@@ -335,6 +447,7 @@ class MupaPlayerViewModel @Inject constructor(
 
         val mediaItems = toMediaItems(tracks)
         withController { ctrl ->
+            ctrl.shuffleModeEnabled = false
             ctrl.setMediaItems(mediaItems, safeIndex, 0L)
             ctrl.prepare()
             ctrl.play()
@@ -342,6 +455,80 @@ class MupaPlayerViewModel @Inject constructor(
         // Pre-fetch lirik & ekstraksi palet Ultra Dynamic di latar belakang
         extractUltraDynamicForTrack(track)
         fetchLyricsForCurrentTrack()
+        if (resolvedSource.isInfinite && tracks.size - 1 - safeIndex <= 3 && resolvedSource !is QueueSource.Radio) {
+            maybeLoadMoreRadioQueue()
+        }
+    }
+
+    /** Muat lanjutan radio otomatis saat sisa antrean <= 3 (untuk sumber tak berujung). */
+    fun maybeLoadMoreRadioQueue() {
+        val state = _uiState.value
+        if (!state.queueSource.isInfinite || state.isLoadingMoreQueue) return
+        val remaining = (state.queue.size - 1) - state.currentIndex
+        if (remaining > 3) return
+        val seedTrack = state.queue.lastOrNull() ?: state.currentTrack ?: return
+        if (seedTrack.sourceType != AudioSourceType.STREAMING) return
+
+        loadRadioForSeed(
+            seedTrack = seedTrack,
+            expectedSource = state.queueSource,
+            continuation = state.continuationToken,
+            playlistId = state.radioPlaylistId,
+        )
+    }
+
+    private fun loadRadioForSeed(
+        seedTrack: Track,
+        expectedSource: QueueSource,
+        continuation: String?,
+        playlistId: String?,
+    ) {
+        radioLoadJob?.cancel()
+        radioLoadJob = viewModelScope.launch {
+            _uiState.update { it.copy(isLoadingMoreQueue = true) }
+            val result = radioProvider.getRadioNext(
+                seedTrack = seedTrack,
+                continuationToken = continuation,
+                playlistId = playlistId,
+            )
+            result.onSuccess { page ->
+                val current = _uiState.value
+                if (current.queueSource != expectedSource) return@onSuccess
+                val filtered = SmartQueueFilter.filterAndOrderRadioCandidates(
+                    seed = current.currentTrack ?: seedTrack,
+                    candidates = page.tracks,
+                    existingQueue = current.queue,
+                    recentTrackIds = current.recentPlayedIds.toSet(),
+                )
+                if (filtered.isNotEmpty()) {
+                    val newQueue = current.queue + filtered
+                    val newOriginal = current.originalQueueOrder + filtered
+                    _uiState.update {
+                        it.copy(
+                            queue = newQueue,
+                            originalQueueOrder = newOriginal,
+                            continuationToken = page.continuationToken,
+                            radioPlaylistId = page.playlistId ?: it.radioPlaylistId,
+                            isLoadingMoreQueue = false,
+                        )
+                    }
+                    withController { ctrl ->
+                        ctrl.addMediaItems(toMediaItems(filtered))
+                    }
+                    persistCurrentQueue()
+                } else {
+                    _uiState.update {
+                        it.copy(
+                            continuationToken = page.continuationToken,
+                            radioPlaylistId = page.playlistId ?: it.radioPlaylistId,
+                            isLoadingMoreQueue = false,
+                        )
+                    }
+                }
+            }.onFailure {
+                _uiState.update { it.copy(isLoadingMoreQueue = false) }
+            }
+        }
     }
 
     fun togglePlayPause() {

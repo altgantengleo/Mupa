@@ -5,6 +5,7 @@ import androidx.compose.ui.graphics.Color
 import com.xeno.mupa.core.designsystem.theme.DynamicCoverAccent
 import com.xeno.mupa.core.designsystem.theme.UltraDynamicPalette
 import com.xeno.mupa.core.model.LyricsLine
+import com.xeno.mupa.core.model.QueueSource
 import com.xeno.mupa.core.model.Track
 import com.xeno.mupa.playback.eq.EqPreset
 import kotlin.math.cbrt
@@ -28,6 +29,13 @@ data class MupaPlayerUiState(
     val currentTrack: Track? = null,
     val queue: List<Track> = emptyList(),
     val currentIndex: Int = 0,
+    val queueSource: QueueSource = QueueSource.Local(),
+    val continuationToken: String? = null,
+    val radioPlaylistId: String? = null,
+    val isLoadingMoreQueue: Boolean = false,
+    val shuffleSeed: Long = 0L,
+    val originalQueueOrder: List<Track> = emptyList(),
+    val recentPlayedIds: List<String> = emptyList(),
     val isPlaying: Boolean = false,
     val positionMs: Long = 0L,
     val bufferedPositionMs: Long = 0L,

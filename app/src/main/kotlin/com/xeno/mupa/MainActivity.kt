@@ -66,6 +66,7 @@ class MainActivity : ComponentActivity() {
                     playerState = playerState,
                     onExitApp = { finish() },
                     onPlayTracks = playerViewModel::playQueue,
+                    onPlayFromSearch = playerViewModel::playFromSearch,
                     onActiveSourceChange = appViewModel::setActiveSource,
                     onImportLocalFiles = appViewModel::importLocalFiles,
                     onImportLocalFolder = appViewModel::importLocalFolder,

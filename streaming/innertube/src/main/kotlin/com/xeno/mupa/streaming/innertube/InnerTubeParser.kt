@@ -40,6 +40,13 @@ object InnerTubeParser {
         val hasCipheredAudioOnly: Boolean,
     )
 
+    data class ParsedNextPage(
+        val tracks: List<Track>,
+        val continuationToken: String?,
+        val automixPlaylistId: String?,
+        val relatedBrowseId: String?,
+    )
+
     fun extractVisitorData(rawJson: String): String? = runCatching {
         val root = tolerantJson.parseToJsonElement(rawJson).jsonObject
         root["responseContext"]?.asObjectOrNull()?.get("visitorData")?.asStringOrNull()
@@ -148,6 +155,122 @@ object InnerTubeParser {
         val artists = mutableListOf<Artist>()
         collectArtistItems(root, artists, limit)
         return Result.success(artists.distinctBy { it.id }.take(limit))
+    }
+
+    /**
+     * Parser respons endpoint InnerTube `POST /youtubei/v1/next` (Radio / Up Next / Automix).
+     * Clean-room dan toleran (nol !!): mendukung halaman awal `playlistPanelRenderer`
+     * maupun lanjutan `continuationContents.playlistPanelContinuation`.
+     */
+    fun parseNextResponse(rawJson: String): Result<ParsedNextPage> {
+        val root = runCatching { tolerantJson.parseToJsonElement(rawJson).jsonObject }
+            .getOrElse { return Result.failure(StreamingError.ParseError("JSON next/radio tidak valid", it)) }
+
+        val tabs = root["contents"]?.asObjectOrNull()
+            ?.get("singleColumnMusicWatchNextResultsRenderer")?.asObjectOrNull()
+            ?.get("tabbedRenderer")?.asObjectOrNull()
+            ?.get("watchNextTabbedResultsRenderer")?.asObjectOrNull()
+            ?.get("tabs")?.asArrayOrNull()
+
+        val panel = root["continuationContents"]?.asObjectOrNull()
+            ?.get("playlistPanelContinuation")?.asObjectOrNull()
+            ?: tabs?.getOrNull(0)?.asObjectOrNull()
+                ?.get("tabRenderer")?.asObjectOrNull()
+                ?.get("content")?.asObjectOrNull()
+                ?.get("musicQueueRenderer")?.asObjectOrNull()
+                ?.get("content")?.asObjectOrNull()
+                ?.get("playlistPanelRenderer")?.asObjectOrNull()
+
+        val relatedBrowseId = tabs?.getOrNull(2)?.asObjectOrNull()
+            ?.get("tabRenderer")?.asObjectOrNull()
+            ?.get("endpoint")?.asObjectOrNull()
+            ?.get("browseEndpoint")?.asObjectOrNull()
+            ?.get("browseId")?.asStringOrNull()
+
+        val contents = panel?.get("contents")?.asArrayOrNull().orEmpty()
+        val tracks = mutableListOf<Track>()
+        var automixPlaylistId: String? = null
+
+        for (entry in contents) {
+            val obj = entry.asObjectOrNull() ?: continue
+            obj["playlistPanelVideoRenderer"]?.asObjectOrNull()?.let { videoRenderer ->
+                parsePlaylistPanelVideoRenderer(videoRenderer)?.let { tracks.add(it) }
+            }
+            if (automixPlaylistId == null) {
+                automixPlaylistId = obj["automixPreviewVideoRenderer"]?.asObjectOrNull()
+                    ?.get("content")?.asObjectOrNull()
+                    ?.get("automixPlaylistVideoRenderer")?.asObjectOrNull()
+                    ?.get("navigationEndpoint")?.asObjectOrNull()
+                    ?.get("watchPlaylistEndpoint")?.asObjectOrNull()
+                    ?.get("playlistId")?.asStringOrNull()
+            }
+        }
+
+        val continuations = panel?.get("continuations")?.asArrayOrNull().orEmpty()
+        val nextToken = continuations.firstNotNullOfOrNull { item ->
+            val obj = item.asObjectOrNull() ?: return@firstNotNullOfOrNull null
+            obj["nextRadioContinuationData"]?.asObjectOrNull()?.get("continuation")?.asStringOrNull()
+                ?: obj["nextContinuationData"]?.asObjectOrNull()?.get("continuation")?.asStringOrNull()
+                ?: obj["automixContinuationData"]?.asObjectOrNull()?.get("continuation")?.asStringOrNull()
+        }
+
+        return Result.success(
+            ParsedNextPage(
+                tracks = tracks.distinctBy { it.id },
+                continuationToken = nextToken,
+                automixPlaylistId = automixPlaylistId,
+                relatedBrowseId = relatedBrowseId,
+            ),
+        )
+    }
+
+    private fun parsePlaylistPanelVideoRenderer(renderer: JsonObject): Track? {
+        val videoId = renderer["videoId"]?.asStringOrNull()
+            ?: renderer["navigationEndpoint"]?.asObjectOrNull()
+                ?.get("watchEndpoint")?.asObjectOrNull()
+                ?.get("videoId")?.asStringOrNull()
+            ?: return null
+        if (!InnerTubeProvider.isLikelyYouTubeVideoId(videoId)) return null
+
+        val title = renderer["title"]?.let { extractRunsText(it) }?.takeIf { it.isNotBlank() }
+            ?: return null
+
+        val bylineRuns = (renderer["longBylineText"] ?: renderer["shortBylineText"])
+            ?.let { extractRunsList(it) }.orEmpty()
+            .filter { it != " • " && it != "•" && it.isNotBlank() }
+
+        val artist = bylineRuns.firstOrNull {
+            !isDurationToken(it) &&
+                !it.equals("Song", true) &&
+                !it.equals("Lagu", true) &&
+                !it.equals("Video", true) &&
+                !it.contains("views", true) &&
+                !it.contains("ditonton", true)
+        } ?: "Artis Tidak Diketahui"
+
+        val album = bylineRuns.getOrNull(1)?.takeIf {
+            !isDurationToken(it) &&
+                !it.matches(Regex("""^\d{4}$""")) &&
+                !it.contains("views", true) &&
+                !it.contains("ditonton", true)
+        }
+
+        val durationText = renderer["lengthText"]?.let { extractRunsText(it) }
+        val durationMs = durationText?.takeIf { isDurationToken(it) }?.let { parseDurationTokenMs(it) } ?: 0L
+
+        val thumbs = renderer["thumbnail"]?.asObjectOrNull()?.get("thumbnails")?.asArrayOrNull()
+        val thumbUrl = upscaleArtworkUrl(thumbs?.lastOrNull()?.asObjectOrNull()?.get("url")?.asStringOrNull())
+            ?: "https://i.ytimg.com/vi/$videoId/hqdefault.jpg"
+
+        return Track(
+            id = videoId,
+            title = title,
+            artistName = artist,
+            albumTitle = album,
+            durationMs = durationMs,
+            artworkUrl = thumbUrl,
+            sourceType = AudioSourceType.STREAMING,
+        )
     }
 
     internal fun upscaleArtworkUrl(rawUrl: String?): String? {
