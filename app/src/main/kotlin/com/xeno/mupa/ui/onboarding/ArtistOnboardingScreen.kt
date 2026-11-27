@@ -509,6 +509,7 @@ private fun ArtistPickerEditorialPage(
                             )
                         }
                         else -> {
+                            val uniqueArtists = remember(uiState.artists) { uiState.artists.distinctBy { it.id } }
                             LazyVerticalGrid(
                                 columns = GridCells.Fixed(columns),
                                 contentPadding = PaddingValues(
@@ -522,7 +523,7 @@ private fun ArtistPickerEditorialPage(
                                 modifier = Modifier.fillMaxSize(),
                             ) {
                                 items(
-                                    items = uiState.artists,
+                                    items = uniqueArtists,
                                     key = { it.id },
                                 ) { artist ->
                                     val isSelected = artist.id in uiState.selectedArtistIds

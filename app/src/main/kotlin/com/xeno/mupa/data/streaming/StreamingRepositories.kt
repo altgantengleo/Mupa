@@ -77,6 +77,7 @@ class StreamingArtistRepository @Inject constructor(
         var emittedAny = false
         catalogAggregator.observeArtistsProgressive(trimmed, limit = 28).collect { onlineArtists ->
             val merged = (onlineArtists + localArtists)
+                .distinctBy { it.id }
                 .distinctBy { it.name.lowercase() }
                 .sortedByDescending { !it.artworkUrl.isNullOrBlank() }
             if (merged.isNotEmpty()) {

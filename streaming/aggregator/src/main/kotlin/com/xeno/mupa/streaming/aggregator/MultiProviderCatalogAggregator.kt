@@ -310,5 +310,8 @@ class MultiProviderCatalogAggregator(
     }
 
     private fun rankArtists(values: Collection<Artist>, limit: Int): List<Artist> =
-        values.sortedByDescending { !it.artworkUrl.isNullOrBlank() }.take(limit)
+        values
+            .distinctBy { it.id }
+            .sortedByDescending { !it.artworkUrl.isNullOrBlank() }
+            .take(limit)
 }

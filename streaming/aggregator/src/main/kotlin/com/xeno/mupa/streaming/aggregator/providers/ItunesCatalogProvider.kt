@@ -140,13 +140,14 @@ class ItunesCatalogProvider(
             val root = runCatching { json.parseToJsonElement(rawJson).jsonObject }
                 .getOrElse { return Result.failure(StreamingError.ParseError("JSON artis iTunes tidak valid", it)) }
             val results = root["results"]?.asArr().orEmpty()
-            val seen = HashSet<String>()
+            val seenIds = HashSet<String>()
+            val seenNames = HashSet<String>()
             val artists = mutableListOf<Artist>()
             for (item in results) {
                 val obj = item.asObj() ?: continue
                 val artistId = obj["artistId"]?.asStr()?.takeIf { it.isNotBlank() } ?: continue
                 val name = obj["artistName"]?.asStr()?.trim()?.takeIf { it.isNotBlank() } ?: continue
-                if (!seen.add(name.lowercase())) continue
+                if (!seenIds.add(artistId) || !seenNames.add(name.lowercase())) continue
                 val artwork = upscaleArtwork(obj["artworkUrl100"]?.asStr())
                 val genre = obj["primaryGenreName"]?.asStr()
                 artists.add(
