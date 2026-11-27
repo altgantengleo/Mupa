@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.statusBars
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -65,6 +66,7 @@ import com.xeno.mupa.ui.player.rememberMupaPlayerSheetState
 fun MupaApp(
     uiState: MupaAppUiState,
     playerState: MupaPlayerUiState,
+    openNowPlayingSignal: Int = 0,
     onExitApp: () -> Unit,
     onPlayTracks: (List<Track>, Int) -> Unit,
     onPlayFromSearch: (Track) -> Unit = { onPlayTracks(listOf(it), 0) },
@@ -153,6 +155,11 @@ fun MupaApp(
     val showBottomBar = currentDestination != null
 
     val playerSheetState = rememberMupaPlayerSheetState()
+    LaunchedEffect(openNowPlayingSignal) {
+        if (openNowPlayingSignal > 0 && playerState.currentTrack != null) {
+            playerSheetState.expand()
+        }
+    }
     val density = LocalDensity.current
 
     val statusBarTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()

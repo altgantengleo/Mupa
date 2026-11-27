@@ -11,11 +11,71 @@ import java.io.File
 
 data class PlaybackServiceConfig(
     @DrawableRes val notificationSmallIconRes: Int,
+    @DrawableRes val favoriteOffIconRes: Int = notificationSmallIconRes,
+    @DrawableRes val favoriteOnIconRes: Int = notificationSmallIconRes,
+    @DrawableRes val shuffleOffIconRes: Int = notificationSmallIconRes,
+    @DrawableRes val shuffleOnIconRes: Int = notificationSmallIconRes,
     val audioCacheMaxBytes: Long = DEFAULT_AUDIO_CACHE_BYTES,
 ) {
     companion object {
         /** Default 500 MB (Default D3 di docs/QUESTIONS.md). */
         const val DEFAULT_AUDIO_CACHE_BYTES: Long = 500L * 1024L * 1024L
+    }
+}
+
+/**
+ * Jembatan sinkronisasi ringan antara MupaPlayerViewModel dan MupaPlaybackService
+ * agar tombol Favorit & Acak di Dynamic Island / HyperIsland / Notifikasi Media selalu tersinkron live.
+ */
+object MupaMediaSessionBridge {
+    @Volatile
+    var isCurrentFavorite: Boolean = false
+        private set
+
+    @Volatile
+    var isShuffleEnabled: Boolean = false
+        private set
+
+    @Volatile
+    var onToggleFavoriteCommand: (() -> Unit)? = null
+
+    @Volatile
+    var onToggleShuffleCommand: (() -> Unit)? = null
+
+    @Volatile
+    private var onSessionLayoutRefresh: (() -> Unit)? = null
+
+    fun attachSessionRefresher(refresher: (() -> Unit)?) {
+        onSessionLayoutRefresh = refresher
+    }
+
+    fun updateState(isFavorite: Boolean, isShuffle: Boolean) {
+        val changed = (isCurrentFavorite != isFavorite) || (isShuffleEnabled != isShuffle)
+        isCurrentFavorite = isFavorite
+        isShuffleEnabled = isShuffle
+        if (changed) {
+            onSessionLayoutRefresh?.invoke()
+        }
+    }
+
+    fun dispatchToggleFavorite() {
+        val handler = onToggleFavoriteCommand
+        if (handler != null) {
+            handler.invoke()
+        } else {
+            isCurrentFavorite = !isCurrentFavorite
+            onSessionLayoutRefresh?.invoke()
+        }
+    }
+
+    fun dispatchToggleShuffle() {
+        val handler = onToggleShuffleCommand
+        if (handler != null) {
+            handler.invoke()
+        } else {
+            isShuffleEnabled = !isShuffleEnabled
+            onSessionLayoutRefresh?.invoke()
+        }
     }
 }
 

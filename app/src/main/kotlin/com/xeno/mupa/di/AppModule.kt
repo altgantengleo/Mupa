@@ -150,6 +150,10 @@ object AppInfrastructureModule {
     @Singleton
     fun providePlaybackServiceConfig(): PlaybackServiceConfig = PlaybackServiceConfig(
         notificationSmallIconRes = R.drawable.ic_notification,
+        favoriteOffIconRes = R.drawable.ic_notif_favorite_border,
+        favoriteOnIconRes = R.drawable.ic_notif_favorite_filled,
+        shuffleOffIconRes = R.drawable.ic_notif_shuffle_off,
+        shuffleOnIconRes = R.drawable.ic_notif_shuffle_on,
         audioCacheMaxBytes = PlaybackServiceConfig.DEFAULT_AUDIO_CACHE_BYTES,
     )
 

@@ -1,5 +1,6 @@
 package com.xeno.mupa
 
+import android.content.Intent
 import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
@@ -9,11 +10,13 @@ import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.view.WindowCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.xeno.mupa.core.designsystem.theme.MupaTheme
+import com.xeno.mupa.playback.MupaPlaybackService
 import com.xeno.mupa.ui.MupaApp
 import com.xeno.mupa.ui.MupaAppViewModel
 import com.xeno.mupa.ui.player.MupaPlayerViewModel
@@ -21,9 +24,22 @@ import dagger.hilt.android.AndroidEntryPoint
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
+    private val openNowPlayingSignal = mutableIntStateOf(0)
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent.getBooleanExtra(MupaPlaybackService.EXTRA_OPEN_NOW_PLAYING, false)) {
+            openNowPlayingSignal.intValue += 1
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         val splash = installSplashScreen()
         super.onCreate(savedInstanceState)
+        if (intent?.getBooleanExtra(MupaPlaybackService.EXTRA_OPEN_NOW_PLAYING, false) == true) {
+            openNowPlayingSignal.intValue += 1
+        }
 
         var keepSplash = true
         splash.setKeepOnScreenCondition { keepSplash }
@@ -64,6 +80,7 @@ class MainActivity : ComponentActivity() {
                 MupaApp(
                     uiState = uiState,
                     playerState = playerState,
+                    openNowPlayingSignal = openNowPlayingSignal.intValue,
                     onExitApp = { finish() },
                     onPlayTracks = playerViewModel::playQueue,
                     onPlayFromSearch = playerViewModel::playFromSearch,

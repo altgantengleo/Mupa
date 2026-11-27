@@ -1,7 +1,11 @@
 package com.xeno.mupa.playback
 
+import android.app.PendingIntent
 import android.content.Intent
 import android.net.Uri
+import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
@@ -21,9 +25,14 @@ import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.audio.AudioSink
 import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.session.CommandButton
 import androidx.media3.session.DefaultMediaNotificationProvider
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
+import androidx.media3.session.SessionCommand
+import androidx.media3.session.SessionResult
+import com.google.common.util.concurrent.Futures
+import com.google.common.util.concurrent.ListenableFuture
 import com.xeno.mupa.streaming.aggregator.ProviderRegistry
 import com.xeno.mupa.streaming.api.StreamLookupRequest
 import dagger.hilt.android.AndroidEntryPoint
@@ -61,6 +70,90 @@ class MupaPlaybackService : MediaLibraryService() {
     private var player: ExoPlayer? = null
     private var crossfadeEngine: MupaCrossfadeEngine? = null
     private var mediaLibrarySession: MediaLibrarySession? = null
+    private val mainHandler = Handler(Looper.getMainLooper())
+
+    private val sessionCallback = object : MediaLibrarySession.Callback {
+        override fun onConnect(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo,
+        ): MediaSession.ConnectionResult {
+            val baseResult = super.onConnect(session, controller)
+            val sessionCommands = baseResult.availableSessionCommands.buildUpon()
+                .add(COMMAND_TOGGLE_FAVORITE)
+                .add(COMMAND_TOGGLE_SHUFFLE)
+                .build()
+            return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
+                .setAvailableSessionCommands(sessionCommands)
+                .setAvailablePlayerCommands(baseResult.availablePlayerCommands)
+                .build()
+        }
+
+        override fun onCustomCommand(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo,
+            customCommand: SessionCommand,
+            args: Bundle,
+        ): ListenableFuture<SessionResult> {
+            when (customCommand.customAction) {
+                ACTION_TOGGLE_FAVORITE -> {
+                    mainHandler.post {
+                        MupaMediaSessionBridge.dispatchToggleFavorite()
+                        refreshSessionCustomLayout()
+                    }
+                    return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+                }
+                ACTION_TOGGLE_SHUFFLE -> {
+                    mainHandler.post {
+                        MupaMediaSessionBridge.dispatchToggleShuffle()
+                        refreshSessionCustomLayout()
+                    }
+                    return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+                }
+            }
+            return super.onCustomCommand(session, controller, customCommand, args)
+        }
+    }
+
+    private fun buildSessionActivityPendingIntent(): PendingIntent? {
+        val launchIntent = packageManager.getLaunchIntentForPackage(packageName)?.apply {
+            flags = Intent.FLAG_ACTIVITY_SINGLE_TOP or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_NEW_TASK
+            putExtra(EXTRA_OPEN_NOW_PLAYING, true)
+        } ?: return null
+        return PendingIntent.getActivity(
+            this,
+            SESSION_ACTIVITY_REQUEST_CODE,
+            launchIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+    }
+
+    private fun buildCustomLayoutButtons(): List<CommandButton> {
+        val isFav = MupaMediaSessionBridge.isCurrentFavorite
+        val isShuf = MupaMediaSessionBridge.isShuffleEnabled
+        val favoriteBtn = CommandButton.Builder()
+            .setDisplayName(if (isFav) "Hapus Favorit" else "Favorit")
+            .setIconResId(if (isFav) serviceConfig.favoriteOnIconRes else serviceConfig.favoriteOffIconRes)
+            .setSessionCommand(COMMAND_TOGGLE_FAVORITE)
+            .setEnabled(true)
+            .build()
+        val shuffleBtn = CommandButton.Builder()
+            .setDisplayName(if (isShuf) "Matikan Acak" else "Acak")
+            .setIconResId(if (isShuf) serviceConfig.shuffleOnIconRes else serviceConfig.shuffleOffIconRes)
+            .setSessionCommand(COMMAND_TOGGLE_SHUFFLE)
+            .setEnabled(true)
+            .build()
+        return listOf(favoriteBtn, shuffleBtn)
+    }
+
+    private fun refreshSessionCustomLayout() {
+        val session = mediaLibrarySession ?: return
+        val buttons = buildCustomLayoutButtons()
+        if (Looper.myLooper() == Looper.getMainLooper()) {
+            session.setCustomLayout(buttons)
+        } else {
+            mainHandler.post { mediaLibrarySession?.setCustomLayout(buttons) }
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -116,11 +209,16 @@ class MupaPlaybackService : MediaLibraryService() {
             .build()
 
         player = exoPlayer
-        mediaLibrarySession = MediaLibrarySession.Builder(
+        val sessionBuilder = MediaLibrarySession.Builder(
             this,
             exoPlayer,
-            object : MediaLibrarySession.Callback {},
-        ).build()
+            sessionCallback,
+        ).setCustomLayout(buildCustomLayoutButtons())
+        buildSessionActivityPendingIntent()?.let { pendingIntent ->
+            sessionBuilder.setSessionActivity(pendingIntent)
+        }
+        mediaLibrarySession = sessionBuilder.build()
+        MupaMediaSessionBridge.attachSessionRefresher { refreshSessionCustomLayout() }
         crossfadeEngine = MupaCrossfadeEngine(
             context = this,
             initialActivePlayer = exoPlayer,
@@ -142,6 +240,7 @@ class MupaPlaybackService : MediaLibraryService() {
             onActivePlayerSwapped = { newActive ->
                 player = newActive
                 mediaLibrarySession?.player = newActive
+                refreshSessionCustomLayout()
             },
         ).also { it.attach() }
     }
@@ -162,6 +261,7 @@ class MupaPlaybackService : MediaLibraryService() {
     }
 
     override fun onDestroy() {
+        MupaMediaSessionBridge.attachSessionRefresher(null)
         mediaLibrarySession?.release()
         mediaLibrarySession = null
         crossfadeEngine?.release()
@@ -205,6 +305,13 @@ class MupaPlaybackService : MediaLibraryService() {
     companion object {
         const val NOTIFICATION_CHANNEL_ID = "mupa_playback_channel"
         const val STREAM_SCHEME = "mupa-stream"
+        const val EXTRA_OPEN_NOW_PLAYING = "com.xeno.mupa.extra.OPEN_NOW_PLAYING"
+        const val ACTION_TOGGLE_FAVORITE = "com.xeno.mupa.action.TOGGLE_FAVORITE"
+        const val ACTION_TOGGLE_SHUFFLE = "com.xeno.mupa.action.TOGGLE_SHUFFLE"
+        private const val SESSION_ACTIVITY_REQUEST_CODE = 1001
+
+        private val COMMAND_TOGGLE_FAVORITE = SessionCommand(ACTION_TOGGLE_FAVORITE, Bundle.EMPTY)
+        private val COMMAND_TOGGLE_SHUFFLE = SessionCommand(ACTION_TOGGLE_SHUFFLE, Bundle.EMPTY)
 
         fun buildStreamingUri(trackId: String, title: String, artist: String): Uri =
             Uri.Builder()

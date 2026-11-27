@@ -27,6 +27,7 @@ import java.io.File
 import com.xeno.mupa.data.local.LocalLibraryRepository
 import com.xeno.mupa.data.lyrics.LyricsRepository
 import com.xeno.mupa.data.lyrics.LyricsRequest
+import com.xeno.mupa.playback.MupaMediaSessionBridge
 import com.xeno.mupa.playback.MupaPlaybackService
 import com.xeno.mupa.playback.QueuePersistenceStore
 import com.xeno.mupa.playback.eq.EqPreset
@@ -171,6 +172,16 @@ class MupaPlayerViewModel @Inject constructor(
     }
 
     init {
+        MupaMediaSessionBridge.onToggleFavoriteCommand = { toggleFavoriteCurrent() }
+        MupaMediaSessionBridge.onToggleShuffleCommand = { toggleShuffle() }
+        viewModelScope.launch {
+            _uiState.collect { st ->
+                MupaMediaSessionBridge.updateState(
+                    isFavorite = st.currentTrack?.isFavorite == true,
+                    isShuffle = st.isShuffleEnabled,
+                )
+            }
+        }
         connectToPlaybackService()
         restorePersistedQueue()
     }
@@ -1067,6 +1078,8 @@ class MupaPlayerViewModel @Inject constructor(
 
     override fun onCleared() {
         isCleared = true
+        MupaMediaSessionBridge.onToggleFavoriteCommand = null
+        MupaMediaSessionBridge.onToggleShuffleCommand = null
         pendingCommand = null
         stopPositionSync()
         lyricsFetchJob?.cancel()
