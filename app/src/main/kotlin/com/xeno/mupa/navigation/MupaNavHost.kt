@@ -21,14 +21,18 @@ import com.xeno.mupa.core.model.AudioSourceType
 import com.xeno.mupa.core.model.GlassStyle
 import com.xeno.mupa.core.model.Track
 import com.xeno.mupa.data.local.LocalImportRules
+import com.xeno.mupa.playback.eq.EqPreset
 import com.xeno.mupa.ui.MupaAppUiState
+import com.xeno.mupa.ui.player.MupaEqualizerOverlay
 import com.xeno.mupa.ui.screens.AccountScreen
+import com.xeno.mupa.ui.screens.AttributionScreen
 import com.xeno.mupa.ui.screens.HomeScreen
 import com.xeno.mupa.ui.screens.HomeViewModel
 import com.xeno.mupa.ui.screens.LibraryScreen
 import com.xeno.mupa.ui.screens.LibraryViewModel
 import com.xeno.mupa.ui.screens.SearchScreen
 import com.xeno.mupa.ui.screens.SearchViewModel
+import com.xeno.mupa.ui.screens.SettingsScreen
 
 fun NavHostController.navigateToTopLevel(destination: MupaTopLevelDestination) {
     navigate(destination.route) {
@@ -59,6 +63,16 @@ fun MupaNavHost(
     continueTrack: Track? = null,
     continueQueue: List<Track> = emptyList(),
     continueIndex: Int = 0,
+    eqPreset: EqPreset = EqPreset.FLAT,
+    eqGainsDb: List<Float> = EqPreset.FLAT.gainsDb,
+    onSelectEqPreset: (EqPreset) -> Unit = {},
+    onEqBandChange: (Int, Float) -> Unit = { _, _ -> },
+    onResetEq: () -> Unit = {},
+    onRescanLocalFolders: () -> Unit = {},
+    onClearAudioCache: () -> Unit = {},
+    onClearImageAndLyricsCache: () -> Unit = {},
+    onExportBackupUri: (android.net.Uri) -> Unit = {},
+    onImportBackupUri: (android.net.Uri) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val tabOrder = MupaTopLevelDestination.entries.associate { it.route to it.ordinal }
@@ -74,6 +88,18 @@ fun MupaNavHost(
         contract = ActivityResultContracts.OpenDocumentTree(),
     ) { treeUri ->
         if (treeUri != null) onImportLocalFolder(treeUri)
+    }
+
+    val exportBackupLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.CreateDocument("application/json"),
+    ) { uri ->
+        if (uri != null) onExportBackupUri(uri)
+    }
+
+    val importBackupLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument(),
+    ) { uri ->
+        if (uri != null) onImportBackupUri(uri)
     }
 
     val launchFileImport: () -> Unit = {
@@ -151,6 +177,7 @@ fun MupaNavHost(
                 onPlayTrack = onPlayTracks,
                 onRetry = vm::retry,
                 onImportLocalFiles = launchFileImport,
+                favoriteArtists = uiState.favoriteArtists,
             )
         }
         composable(MupaTopLevelDestination.LIBRARY.route) {
@@ -184,11 +211,44 @@ fun MupaNavHost(
                 favoriteTracksCount = uiState.favoriteTracksCount,
                 contentPadding = contentPadding,
                 onEditFavoriteArtists = onEditFavoriteArtists,
+                onOpenSettings = { navController.navigate(MupaRoutes.SETTINGS) },
+            )
+        }
+        composable(MupaRoutes.SETTINGS) {
+            SettingsScreen(
+                preferences = uiState.preferences,
+                connectedFoldersCount = uiState.connectedFoldersCount,
+                audioCacheBytes = uiState.audioCacheBytes,
+                statusMessage = uiState.settingsStatusMessage,
+                onBack = { navController.popBackStack() },
                 onGlassStyleChange = onGlassStyleChange,
                 onOledModeChange = onOledModeChange,
-                onAuroraEnabledChange = onAuroraEnabledChange,
+                onUltraDynamicChange = onAuroraEnabledChange,
                 onPerformanceModeChange = onPerformanceModeChange,
                 onStripArtistNameChange = onStripArtistNameChange,
+                onOpenEqualizer = { navController.navigate(MupaRoutes.EQUALIZER) },
+                onClearAudioCache = onClearAudioCache,
+                onImportLocalFolder = launchFolderImport,
+                onRescanLocalFolders = onRescanLocalFolders,
+                onExportBackup = { exportBackupLauncher.launch("mupa-backup.json") },
+                onImportBackup = { importBackupLauncher.launch(arrayOf("application/json", "text/plain")) },
+                onClearImageAndLyricsCache = onClearImageAndLyricsCache,
+                onOpenAttribution = { navController.navigate(MupaRoutes.ATTRIBUTION) },
+            )
+        }
+        composable(MupaRoutes.ATTRIBUTION) {
+            AttributionScreen(
+                onBack = { navController.popBackStack() },
+            )
+        }
+        composable(MupaRoutes.EQUALIZER) {
+            MupaEqualizerOverlay(
+                activePreset = eqPreset,
+                bandGainsDb = eqGainsDb,
+                onSelectPreset = onSelectEqPreset,
+                onBandGainChange = onEqBandChange,
+                onReset = onResetEq,
+                onClose = { navController.popBackStack() },
             )
         }
     }

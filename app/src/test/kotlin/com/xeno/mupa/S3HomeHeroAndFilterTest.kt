@@ -17,6 +17,8 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onFirst
 import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
@@ -200,25 +202,12 @@ class S3HomeHeroAndFilterTest {
             }
         }
 
-        // Halaman 1: Mix Mupa
+        // Hero menampilkan HANYA lagu terakhir yang diputar (sesuai arahan user)
         composeRule.waitForIdle()
-        composeRule.onNodeWithText("MIX MUPA").assertIsDisplayed()
-        composeRule.onNodeWithText("Mix Mupa").assertIsDisplayed()
+        composeRule.onNodeWithText("TERAKHIR DIPUTAR").assertIsDisplayed()
+        composeRule.onAllNodesWithText("Satu Bulan").onFirst().assertIsDisplayed()
         composeRule.onNodeWithTag("mupa_source_switch").assertIsDisplayed()
-        composeRule.onNodeWithTag("mupa_hero_dots").assertIsDisplayed()
-        saveScreenshot("s3/home_hero_page1_mix.png")
-
-        // Geser manual ke Halaman 2: Sorotan Artis
-        composeRule.onNodeWithTag("mupa_home_hero_pager").performTouchInput { swipeLeft() }
-        composeRule.waitForIdle()
-        composeRule.onNodeWithText("SOROTAN ARTIS").assertIsDisplayed()
-        saveScreenshot("s3/home_hero_page2_artist.png")
-
-        // Geser manual ke Halaman 3: Lanjutkan
-        composeRule.onNodeWithTag("mupa_home_hero_pager").performTouchInput { swipeLeft() }
-        composeRule.waitForIdle()
-        composeRule.onNodeWithText("LANJUTKAN").assertIsDisplayed()
-        saveScreenshot("s3/home_hero_page3_continue.png")
+        saveScreenshot("s3/home_hero_last_played.png")
 
         // Uji klik SourceSwitch ke Lokal
         composeRule.onNodeWithContentDescription("Mode Lokal (Ponsel)").performClick()

@@ -1,25 +1,36 @@
 package com.xeno.mupa.ui
 
+import android.content.Context
 import android.net.Uri
 import androidx.compose.runtime.Immutable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import coil3.SingletonImageLoader
 import com.xeno.mupa.core.designsystem.theme.DynamicCoverAccent
 import com.xeno.mupa.core.designsystem.theme.MupaAppearance
+import com.xeno.mupa.core.designsystem.theme.UltraDynamicPaletteCache
 import com.xeno.mupa.core.domain.ArtistRepository
+import com.xeno.mupa.core.domain.MusicSource
 import com.xeno.mupa.core.domain.PreferencesRepository
 import com.xeno.mupa.core.model.Artist
 import com.xeno.mupa.core.model.AudioSourceType
 import com.xeno.mupa.core.model.GlassStyle
 import com.xeno.mupa.core.model.UserPreferences
+import com.xeno.mupa.data.backup.MupaBackupCodec
 import com.xeno.mupa.data.local.LocalLibraryRepository
+import com.xeno.mupa.data.local.db.LyricsCacheDao
+import com.xeno.mupa.playback.eq.EqPreset
 import dagger.hilt.android.lifecycle.HiltViewModel
+import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.io.File
 import javax.inject.Inject
 
 @Immutable
@@ -29,6 +40,9 @@ data class MupaAppUiState(
     val favoriteArtists: List<Artist> = emptyList(),
     val totalTracksCount: Int = 0,
     val favoriteTracksCount: Int = 0,
+    val connectedFoldersCount: Int = 0,
+    val audioCacheBytes: Long = 0L,
+    val settingsStatusMessage: String? = null,
     val isEditingFavoriteArtists: Boolean = false,
 ) {
     val appearance: MupaAppearance
@@ -43,9 +57,12 @@ data class MupaAppUiState(
 
 @HiltViewModel
 class MupaAppViewModel @Inject constructor(
+    @ApplicationContext private val appContext: Context,
     private val preferencesRepository: PreferencesRepository,
     private val artistRepository: ArtistRepository,
+    private val musicSource: MusicSource,
     private val localLibraryRepository: LocalLibraryRepository,
+    private val lyricsCacheDao: LyricsCacheDao,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(MupaAppUiState())
@@ -56,17 +73,27 @@ class MupaAppViewModel @Inject constructor(
             combine(
                 preferencesRepository.userPreferences,
                 localLibraryRepository.localTracksFlow,
-            ) { prefs, localTracks ->
-                prefs to localTracks
-            }.collect { (prefs, localTracks) ->
+                localLibraryRepository.localFoldersFlow,
+            ) { prefs, localTracks, folders ->
+                Triple(prefs, localTracks, folders)
+            }.collect { (prefs, localTracks, folders) ->
                 val artists = artistRepository.getArtistsByIds(prefs.favoriteArtistIds).getOrDefault(emptyList())
+                // Konsistensi angka N6: total & favorit mengikuti activeSource yang sama dengan Pustaka
+                val activeTracks = if (prefs.activeSource == AudioSourceType.LOCAL) {
+                    localTracks
+                } else {
+                    musicSource.getLibraryTracks(AudioSourceType.STREAMING).getOrDefault(emptyList())
+                }
+                val cacheBytes = withContext(Dispatchers.IO) { computeAudioCacheBytes() }
                 _uiState.update {
                     it.copy(
                         isReady = true,
                         preferences = prefs,
                         favoriteArtists = artists,
-                        totalTracksCount = localTracks.size,
-                        favoriteTracksCount = localTracks.count { t -> t.isFavorite },
+                        totalTracksCount = activeTracks.size,
+                        favoriteTracksCount = activeTracks.count { t -> t.isFavorite },
+                        connectedFoldersCount = folders.size,
+                        audioCacheBytes = cacheBytes,
                     )
                 }
             }
@@ -105,6 +132,123 @@ class MupaAppViewModel @Inject constructor(
         viewModelScope.launch { localLibraryRepository.importAudioFolder(treeUri) }
     }
 
+    fun rescanLocalFolders() {
+        viewModelScope.launch {
+            val summary = localLibraryRepository.rescanFolders()
+            _uiState.update {
+                it.copy(
+                    settingsStatusMessage = "Pemindaian selesai: +${summary.importedCount} lagu baru.",
+                )
+            }
+        }
+    }
+
+    fun refreshCacheStats() {
+        viewModelScope.launch {
+            val bytes = withContext(Dispatchers.IO) { computeAudioCacheBytes() }
+            _uiState.update { it.copy(audioCacheBytes = bytes) }
+        }
+    }
+
+    fun clearAudioCache() {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                val dir = File(appContext.cacheDir, "mupa_audio_cache")
+                if (dir.exists()) {
+                    dir.listFiles()?.forEach { child ->
+                        runCatching { child.deleteRecursively() }
+                    }
+                }
+            }
+            val remaining = withContext(Dispatchers.IO) { computeAudioCacheBytes() }
+            _uiState.update {
+                it.copy(
+                    audioCacheBytes = remaining,
+                    settingsStatusMessage = "Cache audio berhasil dibersihkan.",
+                )
+            }
+        }
+    }
+
+    fun clearImageAndLyricsCache() {
+        viewModelScope.launch {
+            withContext(Dispatchers.IO) {
+                runCatching {
+                    val loader = SingletonImageLoader.get(appContext)
+                    loader.memoryCache?.clear()
+                    loader.diskCache?.clear()
+                }
+                UltraDynamicPaletteCache.clear()
+                runCatching { lyricsCacheDao.deleteAll() }
+            }
+            _uiState.update {
+                it.copy(settingsStatusMessage = "Cache gambar, palet UD, dan lirik dibersihkan.")
+            }
+        }
+    }
+
+    fun exportBackupToUri(
+        uri: Uri,
+        eqPreset: EqPreset,
+        eqGainsDb: List<Float>,
+    ) {
+        viewModelScope.launch {
+            val prefs = _uiState.value.preferences
+            val payload = MupaBackupCodec.exportJson(
+                preferences = prefs,
+                eqPreset = eqPreset,
+                eqGainsDb = eqGainsDb,
+            )
+            val ok = withContext(Dispatchers.IO) {
+                runCatching {
+                    appContext.contentResolver.openOutputStream(uri)?.use { out ->
+                        out.write(payload.toByteArray(Charsets.UTF_8))
+                    } ?: error("Tidak dapat membuka berkas tujuan.")
+                }.isSuccess
+            }
+            _uiState.update {
+                it.copy(
+                    settingsStatusMessage = if (ok) {
+                        "Cadangan JSON berhasil disimpan."
+                    } else {
+                        "Gagal menyimpan berkas cadangan."
+                    },
+                )
+            }
+        }
+    }
+
+    fun importBackupFromUri(
+        uri: Uri,
+        onRestoreEq: (EqPreset, List<Float>) -> Unit,
+    ) {
+        viewModelScope.launch {
+            val raw = withContext(Dispatchers.IO) {
+                runCatching {
+                    appContext.contentResolver.openInputStream(uri)?.bufferedReader(Charsets.UTF_8)?.use {
+                        it.readText()
+                    }
+                }.getOrNull()
+            }
+            if (raw.isNullOrBlank()) {
+                _uiState.update { it.copy(settingsStatusMessage = "Berkas cadangan kosong atau tidak terbaca.") }
+                return@launch
+            }
+            MupaBackupCodec.importJson(raw).fold(
+                onSuccess = { restored ->
+                    applyRestoredBackup(restored)
+                    onRestoreEq(restored.eqPreset, restored.eqGainsDb)
+                    _uiState.update { it.copy(settingsStatusMessage = "Cadangan berhasil dipulihkan.") }
+                },
+                onFailure = { err ->
+                    _uiState.update {
+                        it.copy(settingsStatusMessage = err.message ?: "Berkas cadangan tidak valid.")
+                    }
+                },
+            )
+        }
+    }
+
     fun openEditFavoriteArtists() {
         _uiState.update { it.copy(isEditingFavoriteArtists = true) }
     }
@@ -114,7 +258,7 @@ class MupaAppViewModel @Inject constructor(
     }
 
     fun applyRestoredBackup(
-        restored: com.xeno.mupa.data.backup.MupaBackupCodec.RestoredBackup,
+        restored: MupaBackupCodec.RestoredBackup,
     ) {
         viewModelScope.launch {
             val p = restored.preferences
@@ -127,5 +271,11 @@ class MupaAppViewModel @Inject constructor(
                 preferencesRepository.setOnboardingCompleted(p.favoriteArtistIds)
             }
         }
+    }
+
+    private fun computeAudioCacheBytes(): Long {
+        val dir = File(appContext.cacheDir, "mupa_audio_cache")
+        if (!dir.exists()) return 0L
+        return dir.walkTopDown().filter { it.isFile }.sumOf { it.length() }
     }
 }

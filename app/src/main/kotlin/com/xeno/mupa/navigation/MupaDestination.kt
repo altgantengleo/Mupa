@@ -53,4 +53,6 @@ enum class MupaTopLevelDestination(
 object MupaRoutes {
     const val ONBOARDING = "onboarding_artis"
     const val SETTINGS = "pengaturan"
+    const val ATTRIBUTION = "atribusi"
+    const val EQUALIZER = "equalizer"
 }

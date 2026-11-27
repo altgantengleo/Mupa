@@ -1,0 +1,57 @@
+Mupa — Open-Source Android Music Player
+Copyright (C) 2026 Mupa Contributors
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later
+version. See LICENSE for the full text.
+
+================================================================================
+THIRD-PARTY DEPENDENCIES & ATTRIBUTION NOTICES
+================================================================================
+
+Mupa is an original clean-room implementation. It depends on the following
+open-source libraries, fonts, and tools:
+
+1. AndroidX (Core, Activity, Lifecycle, Navigation, DataStore, Room, DocumentFile,
+   Compose, Material3, SplashScreen, Media3 ExoPlayer/Session/DataSource, ProfileInstaller)
+   License: Apache License 2.0
+   https://source.android.com/
+
+2. Kotlin Standard Library, Kotlinx Coroutines, Kotlinx Serialization
+   License: Apache License 2.0
+   https://kotlinlang.org/
+
+3. Dagger / Hilt
+   License: Apache License 2.0
+   https://dagger.dev/hilt/
+
+4. OkHttp, Coil 3, LeakCanary (debug only)
+   License: Apache License 2.0
+   https://square.github.io/okhttp/
+   https://coil-kt.github.io/coil/
+   https://square.github.io/leakcanary/
+
+5. Haze (Backdrop Blur for Jetpack Compose)
+   License: Apache License 2.0
+   https://github.com/chrisbanes/haze
+
+6. Plus Jakarta Sans Font (weights 400, 500, 600, 700)
+   Copyright 2020 The Plus Jakarta Sans Project Authors (Tokotype)
+   License: SIL Open Font License, Version 1.1 (OFL-1.1)
+   https://github.com/tokotype/PlusJakartaSans
+
+7. NewPipeExtractor (isolated inside :streaming:innertube for stream cipher/n-param resolution)
+   License: GNU General Public License v3.0 or later (GPL-3.0-or-later)
+   https://github.com/TeamNewPipe/NewPipeExtractor
+
+8. Rust Local Engine Crates (engine/local-rust/)
+   - lofty (audio tag & artwork reading): Apache-2.0 / MIT
+   - rusqlite (bundled SQLite): MIT
+   - uniffi (Kotlin/Rust FFI bindings): MPL-2.0
+   - regex / serde / thiserror: Apache-2.0 / MIT
+
+9. JUnit 4 (test-only) & Robolectric (test-only)
+   License: Eclipse Public License 1.0 (EPL-1.0) & MIT License
+   https://junit.org/junit4/
+   https://robolectric.org/

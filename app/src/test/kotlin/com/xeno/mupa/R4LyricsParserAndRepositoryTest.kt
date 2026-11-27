@@ -430,5 +430,9 @@ class R4LyricsParserAndRepositoryTest {
             val oldest = map.values.sortedBy { it.cachedAtEpochMs }.take(deleteCount).map { it.cacheKey }
             oldest.forEach { map.remove(it) }
         }
+
+        override suspend fun deleteAll() {
+            map.clear()
+        }
     }
 }

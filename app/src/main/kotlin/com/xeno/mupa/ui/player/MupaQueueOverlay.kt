@@ -78,7 +78,11 @@ fun MupaQueueOverlay(
     modifier: Modifier = Modifier,
 ) {
     val appearance = LocalMupaAppearance.current
-    val backgroundColor = if (appearance.isOledMode) MupaPalette.OledBackground else MupaPalette.Background
+    val backgroundColor = when {
+        appearance.isOledMode -> MupaPalette.OledBackground
+        appearance.shouldRenderUltraDynamic -> appearance.effectiveUltraDynamicPalette.bgDeep
+        else -> MupaPalette.Background
+    }
     val currentTrack = queue.getOrNull(currentIndex)
     val upcoming = if (currentIndex in queue.indices) {
         queue.mapIndexedNotNull { idx, t -> if (idx != currentIndex) idx to t else null }

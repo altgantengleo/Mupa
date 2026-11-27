@@ -26,14 +26,21 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.QueueMusic
 import androidx.compose.material.icons.rounded.Add
+import androidx.compose.material.icons.rounded.Album
 import androidx.compose.material.icons.rounded.CreateNewFolder
 import androidx.compose.material.icons.rounded.DeleteOutline
 import androidx.compose.material.icons.rounded.Favorite
+import androidx.compose.material.icons.rounded.FavoriteBorder
 import androidx.compose.material.icons.rounded.FileUpload
+import androidx.compose.material.icons.rounded.History
 import androidx.compose.material.icons.rounded.LibraryMusic
+import androidx.compose.material.icons.rounded.MusicNote
+import androidx.compose.material.icons.rounded.Person
 import androidx.compose.material.icons.rounded.Refresh
 import androidx.compose.material.icons.rounded.Tune
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
@@ -464,50 +471,54 @@ fun LibraryScreen(
                 val favCovers = uiState.favoriteTracks.mapNotNull { it.artworkUrl }.distinct()
                 val recentCovers = uiState.recentlyAddedTracks.mapNotNull { it.artworkUrl }.distinct()
 
-                // Baris 1: Lagu & Playlist (grid 2 kolom)
+                // Baris 1: Lagu & Playlist (grid 2 kolom kompak, tanpa kolase saat count == 0 — N6)
                 item(key = "tiles_row_1") {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
                         LibraryOverviewTile(
                             title = "Lagu",
                             count = uiState.tracks.size,
-                            artworkBack = covers.getOrNull(1),
-                            artworkFront = covers.getOrNull(0),
+                            emptyIcon = Icons.Rounded.MusicNote,
+                            artworkBack = if (uiState.tracks.isNotEmpty()) covers.getOrNull(1) else null,
+                            artworkFront = if (uiState.tracks.isNotEmpty()) covers.getOrNull(0) else null,
                             onClick = { onOpenCategory(LibraryTileCategory.SONGS) },
                             modifier = Modifier.weight(1f),
                         )
                         LibraryOverviewTile(
                             title = "Playlist",
                             count = uiState.playlists.size,
-                            artworkBack = covers.getOrNull(3),
-                            artworkFront = covers.getOrNull(2),
+                            emptyIcon = Icons.AutoMirrored.Rounded.QueueMusic,
+                            artworkBack = if (uiState.playlists.isNotEmpty()) covers.getOrNull(3) else null,
+                            artworkFront = if (uiState.playlists.isNotEmpty()) covers.getOrNull(2) else null,
                             onClick = { onOpenCategory(LibraryTileCategory.PLAYLISTS) },
                             modifier = Modifier.weight(1f),
                         )
                     }
                 }
 
-                // Baris 2: Album & Artis (grid 2 kolom)
+                // Baris 2: Album & Artis (grid 2 kolom kompak, tanpa kolase saat count == 0 — N6)
                 item(key = "tiles_row_2") {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
                     ) {
                         LibraryOverviewTile(
                             title = "Album",
                             count = uiState.albumsCount,
-                            artworkBack = covers.getOrNull(4),
-                            artworkFront = covers.getOrNull(1),
+                            emptyIcon = Icons.Rounded.Album,
+                            artworkBack = if (uiState.albumsCount > 0) covers.getOrNull(4) else null,
+                            artworkFront = if (uiState.albumsCount > 0) covers.getOrNull(1) else null,
                             onClick = { onOpenCategory(LibraryTileCategory.ALBUMS) },
                             modifier = Modifier.weight(1f),
                         )
                         LibraryOverviewTile(
                             title = "Artis",
                             count = uiState.artistsCount,
-                            artworkBack = covers.getOrNull(5),
-                            artworkFront = covers.getOrNull(2),
+                            emptyIcon = Icons.Rounded.Person,
+                            artworkBack = if (uiState.artistsCount > 0) covers.getOrNull(5) else null,
+                            artworkFront = if (uiState.artistsCount > 0) covers.getOrNull(2) else null,
                             circularFront = true,
                             onClick = { onOpenCategory(LibraryTileCategory.ARTISTS) },
                             modifier = Modifier.weight(1f),
@@ -515,26 +526,28 @@ fun LibraryScreen(
                     }
                 }
 
-                // Tile penuh: Baru ditambahkan
+                // Tile penuh kompak: Baru ditambahkan
                 item(key = "tile_recent") {
                     LibraryOverviewTile(
                         title = "Baru ditambahkan",
                         count = uiState.recentlyAddedTracks.size,
-                        artworkBack = recentCovers.getOrNull(1),
-                        artworkFront = recentCovers.getOrNull(0),
+                        emptyIcon = Icons.Rounded.History,
+                        artworkBack = if (uiState.recentlyAddedTracks.isNotEmpty()) recentCovers.getOrNull(1) else null,
+                        artworkFront = if (uiState.recentlyAddedTracks.isNotEmpty()) recentCovers.getOrNull(0) else null,
                         onClick = { onOpenCategory(LibraryTileCategory.RECENTLY_ADDED) },
                         modifier = Modifier.fillMaxWidth(),
                     )
                 }
 
-                // Tile penuh: Favorit
+                // Tile penuh kompak: Favorit
                 item(key = "tile_favorites") {
                     LibraryOverviewTile(
                         title = "Favorit",
                         count = uiState.favoriteTracks.size,
-                        artworkBack = favCovers.getOrNull(0) ?: covers.getOrNull(0),
+                        emptyIcon = Icons.Rounded.FavoriteBorder,
+                        artworkBack = if (uiState.favoriteTracks.isNotEmpty()) favCovers.getOrNull(0) else null,
                         artworkFront = null,
-                        showHeartBadge = true,
+                        showHeartBadge = uiState.favoriteTracks.isNotEmpty(),
                         onClick = { onOpenCategory(LibraryTileCategory.FAVORITES) },
                         modifier = Modifier.fillMaxWidth(),
                     )
@@ -592,13 +605,15 @@ fun LibraryScreen(
 }
 
 /**
- * Tile Pustaka kategori bergaya Mupa Calm:
- * - Solid Surface1 + hairline 1dp, angka besar krem tabular, tumpukan 2 cover miring di kanan bawah.
+ * Tile Pustaka kategori kompak bergaya Mupa Calm (perbaikan N6):
+ * - Tinggi kompak 92dp, angka krem tabular.
+ * - Saat count == 0: tampilkan ikon kategori tenang, BUKAN kolase sampul lagu palsu.
  */
 @Composable
 private fun LibraryOverviewTile(
     title: String,
     count: Int,
+    emptyIcon: ImageVector,
     artworkBack: String?,
     artworkFront: String?,
     onClick: () -> Unit,
@@ -606,18 +621,19 @@ private fun LibraryOverviewTile(
     circularFront: Boolean = false,
     showHeartBadge: Boolean = false,
 ) {
+    val hasItems = count > 0
     Box(
         modifier = modifier
-            .height(106.dp)
+            .height(92.dp)
             .clip(MupaRadii.Tile)
             .background(MaterialTheme.colorScheme.surfaceContainer)
             .border(1.dp, MaterialTheme.colorScheme.outlineVariant, MupaRadii.Tile)
             .clickable(onClick = onClick)
-            .padding(start = 16.dp, top = 14.dp, end = 12.dp, bottom = 12.dp),
+            .padding(start = 14.dp, top = 12.dp, end = 12.dp, bottom = 10.dp),
     ) {
         Column(
             modifier = Modifier.align(Alignment.TopStart),
-            verticalArrangement = Arrangement.spacedBy(4.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp),
         ) {
             Text(
                 text = title,
@@ -629,7 +645,7 @@ private fun LibraryOverviewTile(
             )
             Text(
                 text = "$count",
-                style = MaterialTheme.typography.headlineMedium.copy(
+                style = MaterialTheme.typography.headlineSmall.copy(
                     fontFeatureSettings = TABULAR_NUMS_FEATURE,
                 ),
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -637,49 +653,70 @@ private fun LibraryOverviewTile(
             )
         }
 
-        // Tumpukan dua cover miring di sudut kanan bawah
-        Box(
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .offset(x = 4.dp, y = 8.dp),
-            contentAlignment = Alignment.BottomEnd,
-        ) {
-            MupaArtworkBox(
-                artworkUrl = artworkBack,
-                contentDescription = null,
-                size = 50.dp,
-                shape = RoundedCornerShape(10.dp),
-                iconSize = 18.dp,
+        if (!hasItems) {
+            // State kosong jujur (N6): hanya ikon halus, nol kolase sampul
+            Box(
                 modifier = Modifier
-                    .offset(x = (-22).dp, y = 2.dp)
-                    .graphicsLayer { rotationZ = -9f },
-            )
-            if (showHeartBadge) {
-                Box(
-                    modifier = Modifier
-                        .size(50.dp)
-                        .graphicsLayer { rotationZ = 6f }
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(MupaPalette.CoralContainer)
-                        .border(1.dp, MupaPalette.CoralPrimary.copy(alpha = 0.4f), RoundedCornerShape(12.dp)),
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Icon(
-                        imageVector = Icons.Rounded.Favorite,
+                    .align(Alignment.BottomEnd)
+                    .size(38.dp)
+                    .clip(RoundedCornerShape(10.dp))
+                    .background(MaterialTheme.colorScheme.surfaceContainerHigh),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = emptyIcon,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.60f),
+                    modifier = Modifier.size(20.dp),
+                )
+            }
+        } else {
+            // Tumpukan dua cover miring di sudut kanan bawah (hanya saat count > 0)
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .offset(x = 4.dp, y = 6.dp),
+                contentAlignment = Alignment.BottomEnd,
+            ) {
+                if (artworkBack != null) {
+                    MupaArtworkBox(
+                        artworkUrl = artworkBack,
                         contentDescription = null,
-                        tint = MupaPalette.CoralPrimary,
-                        modifier = Modifier.size(22.dp),
+                        size = 44.dp,
+                        shape = RoundedCornerShape(9.dp),
+                        iconSize = 16.dp,
+                        modifier = Modifier
+                            .offset(x = (-20).dp, y = 2.dp)
+                            .graphicsLayer { rotationZ = -9f },
                     )
                 }
-            } else {
-                MupaArtworkBox(
-                    artworkUrl = artworkFront,
-                    contentDescription = null,
-                    size = 50.dp,
-                    shape = if (circularFront) CircleShape else RoundedCornerShape(10.dp),
-                    iconSize = 18.dp,
-                    modifier = Modifier.graphicsLayer { rotationZ = 6f },
-                )
+                if (showHeartBadge) {
+                    Box(
+                        modifier = Modifier
+                            .size(44.dp)
+                            .graphicsLayer { rotationZ = 6f }
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(MupaPalette.CoralContainer)
+                            .border(1.dp, MupaPalette.CoralPrimary.copy(alpha = 0.4f), RoundedCornerShape(10.dp)),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(
+                            imageVector = Icons.Rounded.Favorite,
+                            contentDescription = null,
+                            tint = MupaPalette.CoralPrimary,
+                            modifier = Modifier.size(20.dp),
+                        )
+                    }
+                } else {
+                    MupaArtworkBox(
+                        artworkUrl = artworkFront,
+                        contentDescription = null,
+                        size = 44.dp,
+                        shape = if (circularFront) CircleShape else RoundedCornerShape(9.dp),
+                        iconSize = 16.dp,
+                        modifier = Modifier.graphicsLayer { rotationZ = 6f },
+                    )
+                }
             }
         }
     }

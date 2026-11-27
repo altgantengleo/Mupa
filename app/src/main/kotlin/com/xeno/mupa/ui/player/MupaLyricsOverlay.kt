@@ -48,7 +48,9 @@ import androidx.compose.ui.unit.sp
 import com.xeno.mupa.core.designsystem.component.MupaEmptyState
 import com.xeno.mupa.core.designsystem.component.MupaErrorState
 import com.xeno.mupa.core.designsystem.component.MupaSkeletonBox
+import com.xeno.mupa.core.designsystem.theme.LocalMupaAppearance
 import com.xeno.mupa.core.designsystem.theme.MupaMotion
+import com.xeno.mupa.core.designsystem.theme.MupaPalette
 import com.xeno.mupa.core.designsystem.theme.MupaRadii
 import com.xeno.mupa.core.model.LyricsLine
 import kotlinx.coroutines.delay
@@ -215,6 +217,12 @@ fun MupaSyncedLyricsList(
         listState.animateScrollToItem(index = activeIndex, scrollOffset = -targetOffset)
     }
 
+    val appearance = LocalMupaAppearance.current
+    val activeAccentColor = if (appearance.isOledMode) {
+        MupaPalette.TextPrimary
+    } else {
+        appearance.effectiveUltraDynamicPalette.onAccent
+    }
     val textSize = if (isCinemaScale) 27.sp else 22.sp
     val lineHeight = if (isCinemaScale) 36.sp else 30.sp
     val textAlign = if (isCinemaScale) TextAlign.Center else TextAlign.Start
@@ -237,7 +245,7 @@ fun MupaSyncedLyricsList(
 
             val targetColor = when {
                 isPlain -> Color.White.copy(alpha = 0.90f)
-                isActive -> Color.White
+                isActive -> activeAccentColor
                 isPast -> Color.White.copy(alpha = 0.38f)
                 else -> Color.White.copy(alpha = 0.52f)
             }

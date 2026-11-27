@@ -296,45 +296,46 @@ fun HomeScreen(
     val bottomInset = contentPadding.calculateBottomPadding()
     val listState = rememberLazyListState()
 
-    val heroPages = remember(uiState.mixHero, uiState.artistSpotlight, continueTrack, continueQueue, continueIndex, stripArtistName) {
-        buildList {
-            uiState.mixHero?.takeIf { it.tracks.isNotEmpty() }?.let { mix ->
-                add(
-                    HomeHeroPage(
-                        id = "hero_mix_mupa",
-                        kind = HomeHeroKind.MIX_MUPA,
-                        kicker = "MIX MUPA",
-                        title = mix.title,
-                        subtitle = "${mix.tracks.size} lagu · ${mix.subtitle.orEmpty().ifBlank { "Racikan harian untukmu" }}",
-                        artworkUrl = mix.tracks.firstOrNull()?.artworkUrl,
-                        tracks = mix.tracks,
-                        initialTrackIndex = 0,
-                        canReshuffle = true,
-                    ),
-                )
+    val heroPages = remember(uiState.mixHero, uiState.shelves, continueTrack, continueQueue, continueIndex, stripArtistName) {
+        // Hero Beranda menampilkan HANYA lagu terakhir yang diputar (bukan Mix Mupa) sesuai arahan user.
+        // Bila belum ada lagu yang diputar pada sesi ini, fallback ke lagu pertama yang tersedia agar Hero tetap rapi.
+        val fallbackPool = uiState.mixHero?.tracks?.takeIf { it.isNotEmpty() }
+            ?: uiState.shelves.firstOrNull { it.tracks.isNotEmpty() }?.tracks
+            ?: emptyList()
+        val targetTrack = continueTrack ?: fallbackPool.firstOrNull()
+
+        if (targetTrack == null) {
+            emptyList()
+        } else {
+            val display = TrackDisplayRules.formatTrack(targetTrack, stripArtistName)
+            val queueToPlay = if (continueTrack != null) {
+                continueQueue.ifEmpty { listOf(continueTrack) }
+            } else {
+                fallbackPool.ifEmpty { listOf(targetTrack) }
             }
-            uiState.artistSpotlight?.takeIf { it.tracks.isNotEmpty() }?.let { spotlight ->
-                add(spotlight)
+            val safeIdx = if (continueTrack != null) {
+                continueIndex.coerceIn(0, (queueToPlay.size - 1).coerceAtLeast(0))
+            } else {
+                0
             }
-            if (continueTrack != null) {
-                val display = TrackDisplayRules.formatTrack(continueTrack, stripArtistName)
-                val queueToPlay = continueQueue.ifEmpty { listOf(continueTrack) }
-                val safeIdx = continueIndex.coerceIn(0, (queueToPlay.size - 1).coerceAtLeast(0))
-                add(
-                    HomeHeroPage(
-                        id = "hero_continue_${continueTrack.id}",
-                        kind = HomeHeroKind.CONTINUE_LISTENING,
-                        kicker = "LANJUTKAN",
-                        title = display.title,
-                        subtitle = "Lanjutkan mendengarkan · ${display.subtitle}",
-                        artworkUrl = continueTrack.artworkUrl,
-                        tracks = queueToPlay,
-                        initialTrackIndex = safeIdx,
-                        canReshuffle = false,
-                    ),
-                )
-            }
-        }.take(3)
+            listOf(
+                HomeHeroPage(
+                    id = "hero_last_played_${targetTrack.id}",
+                    kind = HomeHeroKind.CONTINUE_LISTENING,
+                    kicker = if (continueTrack != null) "TERAKHIR DIPUTAR" else "SIAP DIPUTAR",
+                    title = display.title,
+                    subtitle = if (continueTrack != null) {
+                        "Lanjutkan mendengarkan · ${display.subtitle}"
+                    } else {
+                        "${display.subtitle} · Putar sekarang"
+                    },
+                    artworkUrl = targetTrack.artworkUrl,
+                    tracks = queueToPlay,
+                    initialTrackIndex = safeIdx,
+                    canReshuffle = false,
+                ),
+            )
+        }
     }
 
     val screenHeightDp = LocalConfiguration.current.screenHeightDp.dp

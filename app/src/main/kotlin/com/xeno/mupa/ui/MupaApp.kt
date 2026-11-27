@@ -90,6 +90,11 @@ fun MupaApp(
     onMoveQueueItem: (Int, Int) -> Unit,
     onRemoveQueueItem: (Int) -> Unit,
     onClearUpcomingQueue: () -> Unit = {},
+    onRescanLocalFolders: () -> Unit = {},
+    onClearAudioCache: () -> Unit = {},
+    onClearImageAndLyricsCache: () -> Unit = {},
+    onExportBackupUri: (android.net.Uri) -> Unit = {},
+    onImportBackupUri: (android.net.Uri) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     if (!uiState.isReady) {
@@ -191,6 +196,16 @@ fun MupaApp(
                     continueTrack = playerState.currentTrack,
                     continueQueue = playerState.queue,
                     continueIndex = playerState.currentIndex,
+                    eqPreset = playerState.eqPreset,
+                    eqGainsDb = playerState.eqGainsDb,
+                    onSelectEqPreset = onSelectEqPreset,
+                    onEqBandChange = onEqBandChange,
+                    onResetEq = onResetEq,
+                    onRescanLocalFolders = onRescanLocalFolders,
+                    onClearAudioCache = onClearAudioCache,
+                    onClearImageAndLyricsCache = onClearImageAndLyricsCache,
+                    onExportBackupUri = onExportBackupUri,
+                    onImportBackupUri = onImportBackupUri,
                     modifier = Modifier
                         .fillMaxSize()
                         .graphicsLayer {
@@ -224,13 +239,13 @@ fun MupaApp(
                 }
             }
 
-            // Scrim gradasi bawah tepat di atas chrome melayang (latar transparan -> latar 95%) — perbaikan B1
+            // Scrim gradasi bawah menutup penuh celah Mini Player <-> Bottom Nav dan belakang Liquid+ (perbaikan B1 & N2)
             if (showBottomBar) {
                 Box(
                     modifier = Modifier
                         .align(Alignment.BottomCenter)
                         .fillMaxWidth()
-                        .height(chromeHeight + 24.dp)
+                        .height(chromeHeight + 28.dp)
                         .graphicsLayer {
                             val p = playerSheetState.progress
                             alpha = (1f - p / 0.35f).coerceIn(0f, 1f)
@@ -238,8 +253,9 @@ fun MupaApp(
                         .background(
                             Brush.verticalGradient(
                                 0.0f to Color.Transparent,
-                                0.22f to bgColor.copy(alpha = 0.88f),
-                                1.0f to bgColor.copy(alpha = 0.96f),
+                                0.16f to bgColor.copy(alpha = 0.90f),
+                                0.45f to bgColor.copy(alpha = 0.97f),
+                                1.0f to bgColor.copy(alpha = 0.99f),
                             ),
                         ),
                 )

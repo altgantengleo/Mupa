@@ -61,6 +61,7 @@ import coil3.request.ImageRequest
 import coil3.request.allowHardware
 import coil3.toBitmap
 import com.xeno.mupa.core.designsystem.component.MupaArtworkBox
+import com.xeno.mupa.core.designsystem.component.UltraDynamicBackground
 import com.xeno.mupa.core.designsystem.theme.LocalMupaAppearance
 import com.xeno.mupa.core.designsystem.theme.MupaMotion
 import com.xeno.mupa.core.designsystem.theme.MupaPalette
@@ -224,12 +225,11 @@ fun MupaCinemaOverlay(
                 lastTouchMs = System.currentTimeMillis()
             },
     ) {
-        // Full-bleed blurred album art backdrop (0 garis hitam!)
-        FullBleedBlurredCoverBackdrop(
-            artworkUrl = track.artworkUrl,
-            topScrimAlpha = 0.36f,
-            midScrimAlpha = 0.44f,
-            bottomScrimAlpha = 0.72f,
+        // Latar Ultra Dynamic penuh (OLED -> hitam pekat #000000, tanpa blur abu-abu kusam)
+        val appearance = LocalMupaAppearance.current
+        UltraDynamicBackground(
+            palette = appearance.effectiveUltraDynamicPalette,
+            headerOnly = false,
         )
 
         // Konten utama Cinema: lirik besar di atas full-bleed cover, atau cover besar + judul

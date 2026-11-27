@@ -66,15 +66,16 @@ fun MupaGlassSurface(
     val solidFill = if (isOled) MupaPalette.OledCard else MupaPalette.Surface1
 
     val blurModifier = if (canUseBackdropBlur && hazeState != null) {
-        val blurRadius = if (style == GlassStyle.CRYSTAL) 20.dp else 14.dp
-        val tintAlpha = if (style == GlassStyle.CRYSTAL) 0.78f else 0.72f
+        // Perbaikan N2: tint >= 0.74, blurRadius >= 24dp, noiseFactor = 0.06 agar teks di belakang pill tidak terbaca
+        val blurRadius = if (style == GlassStyle.CRYSTAL) 26.dp else 24.dp
+        val tintAlpha = if (style == GlassStyle.CRYSTAL) 0.80f else 0.76f
         Modifier.hazeEffect(
             state = hazeState,
             style = HazeStyle(
                 backgroundColor = MupaPalette.Surface1,
                 tint = HazeTint(MupaPalette.Surface1.copy(alpha = tintAlpha)),
                 blurRadius = blurRadius,
-                noiseFactor = 0f,
+                noiseFactor = 0.06f,
             ),
         )
     } else {

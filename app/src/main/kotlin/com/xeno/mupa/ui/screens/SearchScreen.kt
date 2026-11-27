@@ -6,6 +6,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -47,6 +49,7 @@ import androidx.lifecycle.viewModelScope
 import com.xeno.mupa.core.designsystem.component.MupaChipRow
 import com.xeno.mupa.core.designsystem.component.MupaEmptyState
 import com.xeno.mupa.core.designsystem.component.MupaErrorState
+import com.xeno.mupa.core.designsystem.component.MupaFilterChip
 import com.xeno.mupa.core.designsystem.component.MupaSectionHeader
 import com.xeno.mupa.core.designsystem.component.MupaSegmentedTabs
 import com.xeno.mupa.core.designsystem.component.MupaSourceSwitch
@@ -57,6 +60,7 @@ import com.xeno.mupa.core.designsystem.theme.MupaRadii
 import com.xeno.mupa.core.designsystem.theme.MupaSpacing
 import com.xeno.mupa.core.domain.MusicSource
 import com.xeno.mupa.core.domain.PreferencesRepository
+import com.xeno.mupa.core.model.Artist
 import com.xeno.mupa.core.model.AudioSourceType
 import com.xeno.mupa.core.model.Track
 import com.xeno.mupa.core.model.TrackDisplayRules
@@ -229,6 +233,7 @@ class SearchViewModel @Inject constructor(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun SearchScreen(
     uiState: SearchUiState,
@@ -244,6 +249,7 @@ fun SearchScreen(
     onRetry: () -> Unit,
     onImportLocalFiles: () -> Unit = {},
     onSwitchSource: ((AudioSourceType) -> Unit)? = null,
+    favoriteArtists: List<Artist> = emptyList(),
     modifier: Modifier = Modifier,
 ) {
     Column(
@@ -380,14 +386,59 @@ fun SearchScreen(
                             }
                             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
                         }
+                    } else if (favoriteArtists.isNotEmpty()) {
+                        // State awal Cari yang hidup & ringkas dari artis favorit nyata pengguna (perbaikan N8)
+                        item(key = "search_fav_artists_shortcuts") {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 8.dp),
+                                verticalArrangement = Arrangement.spacedBy(12.dp),
+                            ) {
+                                MupaSectionHeader(
+                                    title = "Pintasan Artis Favorit",
+                                    subtitle = "Ketuk untuk langsung mencari lagu mereka",
+                                )
+                                FlowRow(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    favoriteArtists.forEach { artist ->
+                                        MupaFilterChip(
+                                            label = artist.name,
+                                            selected = false,
+                                            leadingIcon = Icons.Rounded.Search,
+                                            onClick = { onSubmitQuery(artist.name) },
+                                        )
+                                    }
+                                }
+                            }
+                        }
                     } else {
                         item(key = "search_initial_hint") {
-                            MupaEmptyState(
-                                icon = Icons.Rounded.Search,
-                                title = "Cari musik favoritmu",
-                                subtitle = "Ketik judul lagu, nama artis, atau album. Ketuk chip sumber untuk beralih antara Streaming dan Lokal.",
-                                modifier = Modifier.padding(top = 16.dp),
-                            )
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(top = 8.dp)
+                                    .clip(MupaRadii.ArtworkMedium)
+                                    .background(MaterialTheme.colorScheme.surfaceContainer)
+                                    .border(1.dp, MaterialTheme.colorScheme.outlineVariant, MupaRadii.ArtworkMedium)
+                                    .padding(horizontal = 16.dp, vertical = 14.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Rounded.Search,
+                                    contentDescription = null,
+                                    tint = MupaPalette.CoralPrimary,
+                                    modifier = Modifier.size(20.dp),
+                                )
+                                Text(
+                                    text = "Ketik judul lagu, artis, atau album. Pakai tombol kanan-atas untuk beralih Streaming & Lokal.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
                         }
                     }
                 }

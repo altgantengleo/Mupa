@@ -99,6 +99,22 @@ class MainActivity : ComponentActivity() {
                     onMoveQueueItem = playerViewModel::moveQueueItem,
                     onRemoveQueueItem = playerViewModel::removeQueueItem,
                     onClearUpcomingQueue = playerViewModel::clearUpcomingQueue,
+                    onRescanLocalFolders = appViewModel::rescanLocalFolders,
+                    onClearAudioCache = appViewModel::clearAudioCache,
+                    onClearImageAndLyricsCache = appViewModel::clearImageAndLyricsCache,
+                    onExportBackupUri = { uri ->
+                        appViewModel.exportBackupToUri(
+                            uri = uri,
+                            eqPreset = playerState.eqPreset,
+                            eqGainsDb = playerState.eqGainsDb,
+                        )
+                    },
+                    onImportBackupUri = { uri ->
+                        appViewModel.importBackupFromUri(uri) { preset, gains ->
+                            playerViewModel.selectEqPreset(preset)
+                            gains.forEachIndexed { idx, gain -> playerViewModel.updateEqBand(idx, gain) }
+                        }
+                    },
                 )
             }
         }

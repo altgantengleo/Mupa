@@ -171,6 +171,9 @@ interface LyricsCacheDao {
         """,
     )
     suspend fun deleteOldest(deleteCount: Int)
+
+    @Query("DELETE FROM lyrics_cache")
+    suspend fun deleteAll()
 }
 
 @Database(
