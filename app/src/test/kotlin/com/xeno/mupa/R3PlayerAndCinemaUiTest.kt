@@ -155,7 +155,7 @@ class R3PlayerAndCinemaUiTest {
         composeRule.onNodeWithTag("mupa_mini_player").performClick()
         composeRule.waitForIdle()
         assertTrue("Tap Mini Player must expand Full Now Playing", expandedFlag)
-        composeRule.onNodeWithTag("mupa_full_now_playing").assertIsDisplayed()
+        composeRule.onNodeWithTag("mupa_full_now_playing", useUnmergedTree = true).assertIsDisplayed()
         savePng("r3_now_playing_360dp")
 
         // 3. Buka panel Lirik inline di Full Now Playing
