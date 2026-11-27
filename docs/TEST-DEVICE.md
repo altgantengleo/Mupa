@@ -75,3 +75,38 @@
 2. Cek cold start splash screen (`#16161A` + glyph terpusat).
 3. Putar lagu streaming → matikan layar 15 menit (setelah setelan §2) → pastikan audio tidak mati; cabut earphone Bluetooth → pastikan otomatis jeda; jeda lagu lalu geser aplikasi dari Recents → pastikan notifikasi & service berhenti bersih (`onTaskRemoved`).
 4. Cek LeakCanary di build **Debug**: lakukan 5× siklus buka-tutup layar, player, Cinema, dan rotasi → pastikan tidak ada notifikasi leak memori.
+
+---
+
+## 4. Skenario Uji Manual Fase 2S & 2T (Status: BELUM TERVERIFIKASI DI PERANGKAT FISIK)
+
+### F. Ultra Dynamic, Cover Morph 520/440 ms, Hero & Pengaturan (Fase 2S)
+1. **Cover biru/pasir (`blue - yung kai`):** Pastikan latar Now Playing & Cinema memunculkan rona biru + pasir (bukan abu kecoklatan) dan tidak ada pita hitam di atas status bar.
+2. **Animasi cover Mini ↔ Full:** Uji tap buka (520 ms), tap tutup (440 ms), half-drag release, serta ganti lagu saat Now Playing terbuka pada layar 60/120 Hz — pastikan tidak ada overshoot/pantulan dan tidak ada kedip hitam.
+3. **Hero Beranda (Lagu Terakhir Diputar):** Putar satu lagu lalu kembali ke Beranda → pastikan Hero menampilkan lagu terakhir yang diputar (bukan Mix Mupa) dengan parallax `0,5×` saat scroll.
+4. **Akun & Pengaturan terpisah:** Buka **Akun → ikon gerigi / baris Pengaturan** → uji ganti Solid/Crystal/Liquid+, Ultra Dynamic, OLED, Performa, Equalizer, Hapus cache audio, Hapus cache gambar & lirik, Cadangkan/Pulihkan JSON, dan layar **Atribusi & Lisensi**.
+
+### G. Antrean Cerdas, Bug `"blue"`, Shuffle & Multi-Provider (Fase 2T)
+1. **Uji Bug `"blue"`:** Buka tab **Cari**, ketik `"blue"`, ketuk hasil utama `"blue - yung kai"`. Buka sheet **Antrean** dan lihat header Now Playing:
+   - Pastikan label sumber menampilkan **`Radio dari 'blue'`**.
+   - Pastikan daftar *Berikutnya* berisi lagu-lagu radio serupa yang bersih (**BUKAN** versi Slowed, Acoustic, Live, Karaoke, Sped Up dari `"blue"`).
+2. **Continuation otomatis & persistensi:** Lewati lagu hingga sisa antrean `<= 3` → pastikan lagu radio baru masuk otomatis. Tutup paksa aplikasi lalu buka lagi → pastikan antrean dan label sumber pulih.
+3. **Shuffle deterministik & tombol Acak:**
+   - Nyalakan Shuffle di Now Playing → lagu aktif tidak bergeser; tekan **Berikutnya**, lalu tekan **Sebelumnya** → harus kembali ke lagu yang tepat sebelumnya.
+   - Matikan Shuffle → sisa antrean kembali ke urutan asli.
+   - Buka **Pustaka → Lagu** → ketuk ikon **Acak** di header daftar → pastikan langsung memutar secara acak.
+4. **Onboarding Artis & Pencarian Multi-Provider (Deezer + iTunes + InnerTube):**
+   - Buka **Akun → Artis Favorit → Ubah** → amati daftar artis berfoto HD muncul cepat secara progresif, uji cari `"Tulus"`, `"Tommy J. Pisa"`, `"yung kai"`, `"Bruno Mars"`, `"Justin Bieber"`.
+   - Ketuk hasil pencarian yang berasal dari katalog Deezer/iTunes → pastikan lagu yang diputar sesuai (judul, artis, durasi ±3 dtk) tanpa salah putar.
+
+### H. Cara Membaca Instrumentasi Kecepatan Lokal (Build Debug Saja)
+Data latensi **TIDAK pernah dikirim ke internet**. Untuk mengukur kecepatan nyata (*time-to-first-result* & *time-to-audio*) di HP fisik via ADB:
+```bash
+adb logcat -s MupaPerf:D
+```
+Contoh keluaran yang diharapkan saat menguji Cari, Onboarding, dan Putar lagu:
+- `MupaPerf[first_result] provider=deezer label="search:blue" ms=280 cache=false`
+- `MupaPerf[first_result] provider=swr_cache label="search:blue" ms=0 cache=true`
+- `MupaPerf[time_to_audio] provider=innertube label="blue" ms=920 cache=false`
+
+> **Catatan Kejujuran:** Seluruh metrik kecepatan nyata, kestabilan audio di jaringan seluler Indonesia, serta status geoblock/rate-limit provider di perangkat nyata bertanda **belum terverifikasi** sampai diukur langsung pada HP dengan perintah di atas.

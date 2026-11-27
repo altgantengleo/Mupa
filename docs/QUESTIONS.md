@@ -17,6 +17,9 @@
 | **Q7** | Model Lisensi | **Open-Source GPL-3.0** (`LICENSE` GPL-3.0 + `NOTICE` atribusi dependensi). Tahap 2 boleh memakai `NewPipeExtractor` terisolasi di balik interface `StreamProvider`. Kode Mupa tetap ditulis sendiri (tidak disalin dari Mochy). |
 | **Q8** | Batas Artis Onboarding | Min **2**, anjuran **4**, maksimal **8**, tanpa tombol lewati. |
 | **Q9** | Pengaturan & Akun | Pengaturan diringkas (`Crystal`/`Liquid+`, Mode OLED, Aurora, Mode Performa, Hapus Nama Artis, Ubah Artis Favorit) & Tab Akun ringkas. |
+| **Q10** | Ultra Dynamic & Fallback Warna (Fase 2S) | Visual UD mengikuti HTML V15 (3 radial blob, drift halus 18 dtk, grain statis 3,6%, tanpa blur layar penuh); cover monokrom mengikuti HTML (abu/perak netral); Coral/Amber Mupa hanya saat **tidak ada cover sama sekali**. |
+| **Q11** | Hero Beranda & Versi (Fase 2S & 2T) | Hero Beranda menampilkan **hanya lagu terakhir yang diputar** (bukan Mix Mupa); versi update dinaikkan ke **`1.2` (`versionCode = 3`)**. |
+| **Q12** | Paket Multi-Provider Aktif (Fase 2T) | User memilih **Paket 1 (maks 3 provider)**: **InnerTube** (Stream + Radio + Katalog) + **Deezer Public API** (Katalog & Foto Artis HD) + **iTunes Search API (`country=ID`)** (Katalog Cepat & Durasi Presisi). |
 
 ---
 
@@ -36,3 +39,6 @@
 | **D10** | Reorder Antrean (R3) | Implementasi **clean-room** berbasis `detectDragGesturesAfterLongPress` + `SwipeToDismissBox` di `MupaQueueOverlay.kt`. | Nol dependensi pihak ketiga tambahan, nol spring overshoot, footprint APK tetap ringan. |
 | **D11** | Sumber Lirik Eksternal (R4) | **Hanya LRCLIB** (`https://lrclib.net/api/get` & `/api/search`, open-source MIT, API publik resmi, timeout 6 dtk, toleransi durasi ±2 dtk) sebagai fallback setelah lirik lokal (`.lrc` sidecar & tag embedded `USLT`/Vorbis). | Musixmatch, Genius, dan NetEase tidak digunakan karena ToS melarang scraping/redistribusi lirik berhak cipta tanpa lisensi. Arsitektur `LyricsProvider` tetap modular bila nanti ingin menambah penyedia legal lain. |
 | **D12** | Harness Screenshot JVM (R0/R2/R3/R5) | **Robolectric `4.14.1` (`@GraphicsMode(NATIVE)`) + `View.drawToBitmap()`** pada `360dp`, `411dp`, `fontScale 1.0/1.3`, dan OLED OFF/ON. | Berjalan cepat & deterministik di JVM lokal/CI tanpa emulator; bukti visual tersimpan dan diperiksa langsung di `docs/screens/`. |
+| **D13** | Implementasi Deezer & iTunes CatalogProvider | Ditulis **clean-room** di `:streaming:aggregator` menggunakan `OkHttp` + `kotlinx.serialization` yang sudah ada (**0 dependensi baru**, Apache-2.0, kompatibel GPL-3.0). | Menghindari penambahan modul Gradle & dependensi baru yang memperlambat build serta nol risiko lisensi. |
+| **D14** | Ambang Pencocokan Lintas Provider | Skor minimal **`0.72`** (judul 0,50 + artis 0,35 + durasi ±3 dtk 0,15 − penalti versi alternatif 0,40) + cache `ConcurrentHashMap`. | Mencegah pemutaran lagu yang salah saat pengguna mengetuk hasil katalog Deezer/iTunes. |
+| **D15** | Repeat pada Antrean Tak Berujung | `REPEAT_MODE_ALL` pada Radio mengulang item yang sudah termuat; `REPEAT_MODE_ONE` mengulang lagu aktif; `REPEAT_MODE_OFF` melanjutkan radio otomatis saat sisa `<= 3`. | Deterministik dan sesuai ekspektasi kontrol Media3. |
